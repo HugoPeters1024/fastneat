@@ -1,7 +1,7 @@
 extern crate genome;
 
 use genome::population::*;
-use genome::params::Settings;
+use genome::params::*;
 
 const XOR_RESULTS: [((f64, f64), f64); 4] = [
     ((0.0, 0.0), 0.0),
@@ -16,6 +16,7 @@ fn main() {
         num_outputs: 1,
         population_size: 200,
         target_species: 4,
+        parameters: Parameters::default(),
     };
     let mut population = Population::new(&settings);
 

@@ -43,7 +43,8 @@ impl Genome {
     }
 
     pub fn add_gene(&mut self, gene: Gene) {
-        if gene.neuron_from == gene.neuron_to && !TOPOLOGY_ALLOW_SELF_CONNECTIONS {
+        // TODO: make this configurable
+        if gene.neuron_from == gene.neuron_to {
             return;
         }
         if let Some(existing_gene) = self.genes.get_mut(&gene.innovation_number) {
@@ -89,7 +90,7 @@ impl Genome {
             .clone()
     }
 
-    pub fn compatibility(&self, other: &Genome) -> f64 {
+    pub fn compatibility(&self, other: &Genome, genes_factor: f64, weight_factor: f64) -> f64 {
         let mut num_mismatch = 0.0;
         let mut weight_diff_sum = 0.0;
         for (l, r) in full_sorted_outer_join(self.genes.values(), other.genes.values(), |a, b| {
@@ -110,8 +111,8 @@ impl Genome {
         }
 
         let n = self.genes.len().max(other.genes.len()) as f64;
-        return COMPAT_MISMATCH_GENES_FACTOR * num_mismatch / n
-            + COMPAT_MISMATCH_WEIGHT_FACTOR * weight_diff_sum;
+        return genes_factor * num_mismatch / n
+            + weight_factor * weight_diff_sum;
     }
 
     pub fn print_dot(&self) {

@@ -1,4 +1,4 @@
-use crate::params::SPECIE_DROPOFF_AGE;
+use crate::params::Parameters;
 
 #[derive(Debug)]
 pub struct Specie {
@@ -18,7 +18,7 @@ impl Specie {
         }
     }
 
-    pub fn should_die(&self) -> bool {
-        self.age_last_improvement >= SPECIE_DROPOFF_AGE
+    pub fn should_die(&self, params: &Parameters) -> bool {
+        self.age_last_improvement >= params.specie_dropoff_age
     }
 }

@@ -1,23 +1,41 @@
-pub const MUTATE_GENOME_ADD_CONNECTION: f64 = 0.1;
-pub const MUTATE_GENOME_ADD_NEURON: f64 = 0.04;
-pub const MUTATE_GENOME_WEIGHT_CHANGE: f64 = 0.8;
-pub const MUTATE_GENE_WEIGHT_CHANGE: f64 = 0.9;
-pub const MUTATE_GENE_NUDGE_FACTOR: f64 = 2.0;
-pub const MUTATE_GENE_TOGGLE_EXPRESSION: f64 = 0.05;
-
-pub const COMPAT_MISMATCH_GENES_FACTOR: f64 = 2.0;
-pub const COMPAT_MISMATCH_WEIGHT_FACTOR: f64 = 0.1;
-
-pub const SPECIE_DROPOFF_AGE: usize = 35;
-pub const SPECIE_GREEDINESS_EXPONENT: f64 = 1.5;
-
-pub const TOPOLOGY_ALLOW_SELF_CONNECTIONS: bool = false;
-pub const ENABLE_ELITISM: bool = true;
-
 #[derive(Clone)]
 pub struct Settings {
     pub num_inputs: usize,
     pub num_outputs: usize,
     pub population_size: usize,
     pub target_species: usize,
+    pub parameters: Parameters,
+}
+
+#[derive(Clone)]
+pub struct Parameters {
+    pub mutate_genome_add_connection: f64,
+    pub mutate_genome_add_neuron: f64,
+    pub mutate_genome_weight_change: f64,
+    pub mutate_gene_weight_change: f64,
+    pub mutate_gene_nudge_factor: f64,
+    pub mutate_gene_toggle_expression: f64,
+    pub compat_mismatch_genes_factor: f64,
+    pub compat_mismatch_weight_factor: f64,
+    pub specie_dropoff_age: usize,
+    pub specie_greediness_exponent: f64,
+    pub enable_elitism: bool,
+}
+
+impl Default for Parameters {
+    fn default() -> Self {
+        Parameters {
+            mutate_genome_add_connection: 0.1,
+            mutate_genome_add_neuron: 0.04,
+            mutate_genome_weight_change: 0.8,
+            mutate_gene_weight_change: 0.9,
+            mutate_gene_nudge_factor: 2.0,
+            mutate_gene_toggle_expression: 0.05,
+            compat_mismatch_genes_factor: 2.0,
+            compat_mismatch_weight_factor: 0.1,
+            specie_dropoff_age: 35,
+            specie_greediness_exponent: 1.5,
+            enable_elitism: true,
+        }
+    }
 }

@@ -124,7 +124,12 @@ impl Population {
 
             for (specie_idx, specie) in self.species.iter() {
                 let rep = &self.members[specie.rep_idx];
-                if self.members[member_idx].compatibility(&rep) < self.compatility_threshold {
+                if self.members[member_idx].compatibility(
+                    &rep,
+                    self.settings.parameters.compat_mismatch_genes_factor,
+                    self.settings.parameters.compat_mismatch_weight_factor,
+                ) < self.compatility_threshold
+                {
                     self.members[member_idx].specie_idx = Some(*specie_idx);
                     continue 'member_loop;
                 }
@@ -162,23 +167,25 @@ impl Population {
 
     fn mutate(&mut self, genome: &mut Genome) {
         let mut rng = rand::thread_rng();
+        let params = self.settings.parameters.clone();
 
-        if rng.gen::<f64>() < MUTATE_GENOME_WEIGHT_CHANGE {
+        if rng.gen::<f64>() < params.mutate_genome_weight_change {
             for gene in genome.genes.values_mut() {
-                if rng.gen::<f64>() < MUTATE_GENE_WEIGHT_CHANGE {
-                    gene.weight +=
-                        rng.gen_range(-MUTATE_GENE_NUDGE_FACTOR..MUTATE_GENE_NUDGE_FACTOR);
+                if rng.gen::<f64>() < params.mutate_gene_weight_change {
+                    gene.weight += rng.gen_range(
+                        -params.mutate_gene_nudge_factor..params.mutate_gene_nudge_factor,
+                    );
                 }
             }
         }
 
         for gene in genome.genes.values_mut() {
-            if rng.gen::<f64>() < MUTATE_GENE_TOGGLE_EXPRESSION {
+            if rng.gen::<f64>() < params.mutate_gene_toggle_expression {
                 gene.enabled = !gene.enabled;
             }
         }
 
-        if rng.gen::<f64>() < MUTATE_GENOME_ADD_CONNECTION {
+        if rng.gen::<f64>() < params.mutate_genome_add_connection {
             let neuron_from = genome.sample_neuron();
             let neuron_to = genome.sample_neuron();
             let innovation_number = self.next_innovation_number(neuron_from, neuron_to);
@@ -194,7 +201,7 @@ impl Population {
             });
         }
 
-        if rng.gen::<f64>() < MUTATE_GENOME_ADD_NEURON && genome.genes.len() > 0 {
+        if rng.gen::<f64>() < params.mutate_genome_add_neuron && genome.genes.len() > 0 {
             let new_neuron_id = genome.get_num_neurons();
             let gene_to_split = genome.sample_gene_mut();
 
@@ -299,7 +306,7 @@ impl Population {
             }
         }
 
-        if ENABLE_ELITISM {
+        if self.settings.parameters.enable_elitism {
             let mut elite = self.members[elite_idx].clone();
             elite.specie_idx = None;
             new_population.push(elite);
@@ -349,7 +356,7 @@ impl Population {
             .map(|(specie_idx, adjusted_fitness)| {
                 (
                     *specie_idx,
-                    if self.species[specie_idx].should_die() {
+                    if self.species[specie_idx].should_die(&self.settings.parameters) {
                         0
                     } else {
                         ((adjusted_fitness / global_avg)
@@ -369,8 +376,16 @@ impl Population {
             let total_fitness: f64 = all_fitnesses.iter().map(|x| x.1).sum();
 
             for _ in 0..offspring_by_species[specie_idx] {
-                let parent1 = sample_parent(&all_fitnesses, total_fitness);
-                let parent2 = sample_parent(&all_fitnesses, total_fitness);
+                let parent1 = sample_parent(
+                    &all_fitnesses,
+                    total_fitness,
+                    self.settings.parameters.specie_greediness_exponent,
+                );
+                let parent2 = sample_parent(
+                    &all_fitnesses,
+                    total_fitness,
+                    self.settings.parameters.specie_greediness_exponent,
+                );
 
                 let mut child = self.crossover(&self.members[parent1], &self.members[parent2]);
                 self.mutate(&mut child);
@@ -412,9 +427,13 @@ impl Population {
     }
 }
 
-fn sample_parent(sorted_fitness: &Vec<(usize, f64)>, total_fitness: f64) -> usize {
+fn sample_parent(
+    sorted_fitness: &Vec<(usize, f64)>,
+    total_fitness: f64,
+    greedy_exponent: f64,
+) -> usize {
     let mut rng = rand::thread_rng();
-    let sample = (rng.gen_range(0.0..1.0) as f64).powf(SPECIE_GREEDINESS_EXPONENT) * total_fitness;
+    let sample = (rng.gen_range(0.0..1.0) as f64).powf(greedy_exponent) * total_fitness;
     let mut acc = 0.0;
     for (i, fitness) in sorted_fitness {
         acc += fitness;
