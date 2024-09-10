@@ -8,43 +8,33 @@ use population::*;
 
 use crate::params::Settings;
 
+const XOR_RESULTS: [((f64, f64), f64); 4] = [
+    ((0.0, 0.0), 0.0),
+    ((0.0, 1.0), 1.0),
+    ((1.0, 0.0), 1.0),
+    ((1.0, 1.0), 0.0),
+];
+
 fn main() {
     let settings = Settings {
         num_inputs: 2,
         num_outputs: 1,
         population_size: 200,
-        target_species: 5,
+        target_species: 4,
     };
     let mut population = Population::new(&settings);
 
-    let xor_results = vec![
-        ((0.0, 0.0), 0.0),
-        ((0.0, 1.0), 1.0),
-        ((1.0, 0.0), 1.0),
-        ((1.0, 1.0), 0.0),
-    ];
-
-    for _ in 0..600 {
-        for genome_idx in 0..population.members.len() {
-            let mut network = population.get_phenotype(&population.members[genome_idx]);
-            let genome = &mut population.members[genome_idx];
-            genome.fitness = 0.0;
-            for ((lhs, rhs), expected) in xor_results.iter() {
-                for _ in 0..10 {
-                    network.update(0.2, &vec![*lhs, *rhs]);
-                }
-                let output = network.get_outputs()[0];
-                genome.fitness += 1.0 - ((output - expected).abs()).powi(2);
-            }
-        }
+    for _ in 0..700 {
+        eval_population(&mut population);
         population.evolve();
     }
 
+    eval_population(&mut population);
     let genome = &population.get_winner();
-    let mut i = population.get_phenotype(&genome);
     dbg!(genome);
 
-    for ((inputs, outputs), _) in xor_results {
+    for ((inputs, outputs), _) in XOR_RESULTS {
+        let mut i = population.get_phenotype(&genome);
         for _ in 0..10 {
             i.update(0.2, &vec![inputs, outputs]);
         }
@@ -52,4 +42,18 @@ fn main() {
     }
 
     genome.print_dot();
+}
+
+fn eval_population(population: &mut Population) {
+    for genome_idx in 0..population.members.len() {
+        (&mut population.members[genome_idx]).fitness = 0.0;
+        for ((lhs, rhs), expected) in XOR_RESULTS.iter() {
+            let mut network = population.get_phenotype(&population.members[genome_idx]);
+            for _ in 0..10 {
+                network.update(0.2, &vec![*lhs, *rhs]);
+            }
+            let output = network.get_outputs()[0];
+            (&mut population.members[genome_idx]).fitness += 1.0 - (output - expected).powi(2);
+        }
+    }
 }

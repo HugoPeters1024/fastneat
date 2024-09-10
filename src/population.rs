@@ -166,7 +166,8 @@ impl Population {
         if rng.gen::<f64>() < MUTATE_GENOME_WEIGHT_CHANGE {
             for gene in genome.genes.values_mut() {
                 if rng.gen::<f64>() < MUTATE_GENE_WEIGHT_CHANGE {
-                    gene.weight += rng.gen_range(-0.1..0.1);
+                    gene.weight +=
+                        rng.gen_range(-MUTATE_GENE_NUDGE_FACTOR..MUTATE_GENE_NUDGE_FACTOR);
                 }
             }
         }
@@ -181,7 +182,7 @@ impl Population {
             let neuron_from = genome.sample_neuron();
             let neuron_to = genome.sample_neuron();
             let innovation_number = self.next_innovation_number(neuron_from, neuron_to);
-            let weight = rng.gen_range(-1.0..1.0);
+            let weight = rng.gen_range(-10.0..10.0);
 
             genome.add_gene(Gene {
                 innovation_number,
@@ -297,9 +298,12 @@ impl Population {
                 elite_idx = member_idx;
             }
         }
-        let mut elite = self.members[elite_idx].clone();
-        elite.specie_idx = None;
-        new_population.push(elite);
+
+        if ENABLE_ELITISM {
+            let mut elite = self.members[elite_idx].clone();
+            elite.specie_idx = None;
+            new_population.push(elite);
+        }
 
         // collect in which specie existing organisms are.
         let mut members_by_species: HashMap<usize, Vec<usize>> = HashMap::new();
@@ -379,7 +383,7 @@ impl Population {
             new_population.push(self.spawn_new_genome());
         }
 
-        self.members = new_population;
+        self.members = new_population.as_slice()[0..self.members.len()].to_vec();
         self.speciate();
 
         if self.species.len() < self.settings.target_species {

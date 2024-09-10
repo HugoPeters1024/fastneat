@@ -121,7 +121,7 @@ impl Genome {
         for gene in self.genes.values() {
             if gene.enabled {
                 println!(
-                    "n{} -> n{} [label=\"{}\"]",
+                    "n{} -> n{} [label=\"{:.2}\"]",
                     gene.neuron_from, gene.neuron_to, gene.weight
                 );
             }
