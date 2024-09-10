@@ -1,12 +1,7 @@
-mod ctrnn;
-mod genome;
-mod params;
-mod population;
-mod specie;
+extern crate genome;
 
-use population::*;
-
-use crate::params::Settings;
+use genome::population::*;
+use genome::params::Settings;
 
 const XOR_RESULTS: [((f64, f64), f64); 4] = [
     ((0.0, 0.0), 0.0),

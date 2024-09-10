@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use rand::Rng;
 
-use crate::full_sorted_outer_join;
+use crate::population::full_sorted_outer_join;
 use crate::params::*;
 
 #[derive(Clone, Debug)]
