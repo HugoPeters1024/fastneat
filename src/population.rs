@@ -16,6 +16,7 @@ pub struct Population {
     // specie id -> Specie
     species: HashMap<usize, Specie>,
     compatility_threshold: f64,
+    generation: usize,
 }
 
 impl Population {
@@ -27,7 +28,8 @@ impl Population {
             settings: settings.clone(),
             members: Vec::new(),
             species: HashMap::new(),
-            compatility_threshold: 6.0,
+            compatility_threshold: settings.parameters.specie_threshold_initial,
+            generation: 0,
         };
 
         for _ in 0..settings.population_size {
@@ -64,26 +66,26 @@ impl Population {
 
         // initial topology is [inputs] + bias -> [outputs]
         // with a connection from the bias neuron to each output
-        for i in 0..self.settings.num_outputs {
-            let neuron_from = bias_idx;
-            let neuron_to = first_output_idx + i;
-            let innovation_number = self.next_innovation_number(neuron_from, neuron_to);
-            genome.add_gene(Gene {
-                innovation_number,
-                neuron_from,
-                neuron_to,
-                weight: rand::thread_rng().gen_range(-10.0..10.0),
-                enabled: true,
-                from_is_bias: true,
-            });
+        if self.settings.parameters.start_with_bias_connections {
+            for i in 0..self.settings.num_outputs {
+                let neuron_from = bias_idx;
+                let neuron_to = first_output_idx + i;
+                let innovation_number = self.next_innovation_number(neuron_from, neuron_to);
+                genome.add_gene(Gene {
+                    innovation_number,
+                    neuron_from,
+                    neuron_to,
+                    weight: rand::thread_rng().gen_range(-1.0..1.0),
+                    enabled: true,
+                    from_is_bias: true,
+                });
+            }
         }
 
         return genome;
     }
 
     fn speciate(&mut self) {
-        let mut rng = rand::thread_rng();
-
         // collect in which specie existing organisms are.
         let mut members_by_species: HashMap<usize, Vec<usize>> = HashMap::new();
         for (i, member) in self.members.iter().enumerate() {
@@ -105,13 +107,21 @@ impl Population {
         for (specie_id, specie) in self.species.iter_mut() {
             let specie_members = &members_by_species[specie_id];
             debug_assert!(!specie_members.is_empty());
-            let idx = rng.gen_range(0..specie_members.len());
 
-            let rep_idx = specie_members[idx];
-            specie.rep_idx = rep_idx;
+            let specie_winner: usize = specie_members
+                .iter()
+                .max_by(|l, r| {
+                    self.members[**l]
+                        .fitness
+                        .partial_cmp(&self.members[**r].fitness)
+                        .unwrap()
+                })
+                .unwrap()
+                .clone();
 
+            specie.rep_idx = specie_winner;
             // also let the rep itself know it is again part of the species
-            self.members[rep_idx].specie_idx = Some(*specie_id);
+            self.members[specie_winner].specie_idx = Some(*specie_id);
         }
 
         // for each member, compare to each specie to see if it belongs there.
@@ -151,6 +161,7 @@ impl Population {
             num_neurons,
             self.settings.num_inputs,
             self.settings.num_outputs,
+            self.settings.parameters.activation_function.clone(),
         );
 
         for (_, gene) in genome.genes.iter() {
@@ -309,6 +320,7 @@ impl Population {
         if self.settings.parameters.enable_elitism {
             let mut elite = self.members[elite_idx].clone();
             elite.specie_idx = None;
+            elite.fitness = 0.0;
             new_population.push(elite);
         }
 
@@ -402,15 +414,18 @@ impl Population {
         self.speciate();
 
         if self.species.len() < self.settings.target_species {
-            self.compatility_threshold -= 0.3;
+            self.compatility_threshold -= self.settings.parameters.specie_threshold_nudge_factor;
         }
 
         if self.species.len() > self.settings.target_species {
-            self.compatility_threshold += 0.3;
+            self.compatility_threshold += self.settings.parameters.specie_threshold_nudge_factor;
         }
 
+        self.generation += 1;
+
         println!(
-            "nr_species = {}, pop_size = {}, threshold = {}, best_fitness = {}",
+            "gen = {}, nr_species = {}, pop_size = {}, threshold = {}, best_fitness = {}",
+            self.generation,
             self.species.len(),
             self.members.len(),
             self.compatility_threshold,

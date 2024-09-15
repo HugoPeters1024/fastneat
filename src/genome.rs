@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, HashSet};
 
 use rand::Rng;
 
-use crate::population::full_sorted_outer_join;
 use crate::params::*;
+use crate::population::full_sorted_outer_join;
 
 #[derive(Clone, Debug)]
 pub struct Gene {
@@ -29,14 +29,16 @@ pub struct Genome {
 impl Genome {
     pub fn empty(settings: &Settings) -> Genome {
         let mut all_neurons = HashSet::new();
+        let mut max_neuron_id = 0;
         for i in 0..settings.num_inputs + 1 + settings.num_outputs {
             all_neurons.insert(i);
+            max_neuron_id = max_neuron_id.max(i);
         }
         return Genome {
             genes: BTreeMap::new(),
             all_innovation_numbers: Vec::new(),
             all_neurons,
-            max_neuron_id: 0,
+            max_neuron_id,
             fitness: 0.0,
             specie_idx: None,
         };
@@ -110,9 +112,8 @@ impl Genome {
             }
         }
 
-        let n = self.genes.len().max(other.genes.len()) as f64;
-        return genes_factor * num_mismatch / n
-            + weight_factor * weight_diff_sum;
+        let n = self.genes.len().max(other.genes.len()).max(1) as f64;
+        return genes_factor * (num_mismatch / n) + weight_factor * weight_diff_sum;
     }
 
     pub fn print_dot(&self) {

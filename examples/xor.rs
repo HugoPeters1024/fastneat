@@ -1,7 +1,5 @@
-extern crate genome;
-
-use genome::population::*;
 use genome::params::*;
+use genome::population::*;
 
 const XOR_RESULTS: [((f64, f64), f64); 4] = [
     ((0.0, 0.0), 0.0),
@@ -15,13 +13,20 @@ fn main() {
         num_inputs: 2,
         num_outputs: 1,
         population_size: 200,
-        target_species: 4,
-        parameters: Parameters::default(),
+        target_species: 10,
+        parameters: Parameters {
+            specie_greediness_exponent: 1.6,
+            specie_dropoff_age: 15,
+            ..Default::default()
+        },
     };
     let mut population = Population::new(&settings);
 
-    for _ in 0..700 {
+    for _ in 0..1700 {
         eval_population(&mut population);
+        if population.get_winner().fitness > 3.99 {
+            break;
+        }
         population.evolve();
     }
 
