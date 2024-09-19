@@ -112,7 +112,6 @@ fn setup(
             target_species: 7,
             parameters: Parameters {
                 specie_greediness_exponent: 4.5,
-                start_with_bias_connections: true,
                 specie_threshold_nudge_factor: 0.5,
                 activation_function: ActivationFunction::Tanh,
                 ..default()

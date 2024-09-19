@@ -48,7 +48,7 @@ impl Ctrnn {
         self.y
             .data()
             .iter()
-            .skip(self.num_inputs + 1)
+            .skip(self.num_inputs)
             .take(self.nr_output_neurons)
             .cloned()
             .map(|x| self.activation(x))

@@ -34,12 +34,12 @@ impl Genome {
     pub fn empty(settings: &Settings) -> Genome {
         let mut all_neurons = HashMap::new();
         let mut max_neuron_id = 0;
-        for i in 0..settings.num_inputs + 1 + settings.num_outputs {
+        for i in 0..settings.num_inputs + settings.num_outputs {
             all_neurons.insert(
                 i,
                 Neuron {
                     tau: 0.1,
-                    is_bias: i == settings.num_inputs,
+                    is_bias: false
                 },
             );
             max_neuron_id = max_neuron_id.max(i);
@@ -52,6 +52,10 @@ impl Genome {
             fitness: 0.0,
             specie_idx: None,
         };
+    }
+
+    pub fn add_neuron(&mut self, id: usize, neuron: Neuron) {
+        self.neurons.insert(id, neuron);
     }
 
     pub fn add_gene(&mut self, gene: Gene) {

@@ -17,6 +17,7 @@ pub enum ActivationFunction {
 pub struct Parameters {
     pub mutate_genome_add_connection: f64,
     pub mutate_genome_add_neuron: f64,
+    pub mutate_genome_add_bias_neuron: f64,
     pub mutate_genome_weight_change: f64,
     pub mutate_gene_weight_change: f64,
     pub mutate_gene_nudge_factor: f64,
@@ -32,7 +33,6 @@ pub struct Parameters {
     pub specie_dropoff_age: usize,
     pub specie_greediness_exponent: f64,
     pub enable_elitism: bool,
-    pub start_with_bias_connections: bool,
     pub activation_function: ActivationFunction,
 }
 
@@ -41,6 +41,7 @@ impl Default for Parameters {
         Parameters {
             mutate_genome_add_connection: 0.08,
             mutate_genome_add_neuron: 0.06,
+            mutate_genome_add_bias_neuron: 0.02,
             mutate_genome_weight_change: 0.8,
             mutate_gene_weight_change: 0.9,
             mutate_gene_nudge_factor: 1.5,
@@ -56,7 +57,6 @@ impl Default for Parameters {
             specie_threshold_nudge_factor: 0.3,
             specie_greediness_exponent: 1.5,
             enable_elitism: true,
-            start_with_bias_connections: true,
             activation_function: ActivationFunction::Sigmoid,
         }
     }

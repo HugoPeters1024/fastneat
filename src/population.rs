@@ -59,29 +59,7 @@ impl Population {
     }
 
     fn spawn_new_genome(&mut self) -> Genome {
-        let bias_idx = self.settings.num_inputs;
-        let first_output_idx = bias_idx + 1;
-
-        let mut genome = Genome::empty(&self.settings);
-
-        // initial topology is [inputs] + bias -> [outputs]
-        // with a connection from the bias neuron to each output
-        if self.settings.parameters.start_with_bias_connections {
-            for i in 0..self.settings.num_outputs {
-                let neuron_from = bias_idx;
-                let neuron_to = first_output_idx + i;
-                let innovation_number = self.next_innovation_number(neuron_from, neuron_to);
-                genome.add_gene(Gene {
-                    innovation_number,
-                    neuron_from,
-                    neuron_to,
-                    weight: rand::thread_rng().gen_range(-1.0..1.0),
-                    enabled: true,
-                });
-            }
-        }
-
-        return genome;
+        Genome::empty(&self.settings)
     }
 
     fn speciate(&mut self) {
@@ -255,6 +233,23 @@ impl Population {
 
             genome.add_gene(connection_to);
             genome.add_gene(connection_from);
+        }
+
+        if rng.gen::<f64>() < params.mutate_genome_add_bias_neuron {
+            let new_neuron_id = genome.get_num_neurons();
+            let connect_to = genome.sample_neuron_id();
+
+            let connection = Gene {
+                innovation_number: self
+                    .next_innovation_number(new_neuron_id, connect_to),
+                neuron_from: new_neuron_id,
+                neuron_to: connect_to,
+                weight: 1.0,
+                enabled: true,
+            };
+
+            genome.add_neuron(new_neuron_id, Neuron { tau: 0.1, is_bias: true });
+            genome.add_gene(connection);
         }
     }
 

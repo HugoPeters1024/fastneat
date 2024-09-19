@@ -19,7 +19,6 @@ fn main() {
             mutate_genome_add_neuron: 0.1,
             specie_greediness_exponent: 3.5,
             specie_dropoff_age: 15,
-            start_with_bias_connections: false,
             ..Default::default()
         },
     };
