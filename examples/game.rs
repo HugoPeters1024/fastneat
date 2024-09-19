@@ -1,5 +1,13 @@
+use std::collections::VecDeque;
+
 use bevy::prelude::*;
+use bevy_egui::{
+    egui::{self, Color32},
+    EguiContexts, EguiPlugin,
+};
+
 use bevy_rapier3d::prelude::*;
+use egui_plot::{Line, Plot, PlotPoint, PlotPoints};
 use genome::{
     ctrnn::Ctrnn,
     params::{ActivationFunction, Parameters, Settings},
@@ -11,12 +19,20 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_plugins(RapierDebugRenderPlugin::default())
+        //.add_plugins(RapierDebugRenderPlugin::default())
+        .add_plugins(EguiPlugin)
         .add_systems(Startup, setup)
         .add_systems(FixedUpdate, handle_reset)
         .add_systems(FixedUpdate, handle_agents)
+        .add_systems(Update, draw_plot)
         .add_event::<ResetEvent>()
         .run();
+}
+
+#[derive(Resource, Default)]
+struct FitnessPlot {
+    max_fitness: VecDeque<f64>,
+    avg_fitness: VecDeque<f64>,
 }
 
 #[derive(Resource)]
@@ -35,7 +51,7 @@ struct Target;
 #[derive(Event)]
 struct ResetEvent;
 
-const SIMULATION_SPEED: f32 = 10.0;
+const SIMULATION_SPEED: f32 = 3.0;
 
 /// set up a simple 3D scene
 fn setup(
@@ -49,7 +65,9 @@ fn setup(
         dt: SIMULATION_SPEED / 64.0,
         substeps: SIMULATION_SPEED as usize,
     };
-    commands.insert_resource(Time::<Fixed>::from_hz(SIMULATION_SPEED as f64 * 64.0));
+    //commands.insert_resource(Time::<Fixed>::from_hz(SIMULATION_SPEED as f64 * 64.0));
+
+    commands.init_resource::<FitnessPlot>();
 
     commands.spawn((
         PbrBundle {
@@ -90,11 +108,11 @@ fn setup(
         pop: Population::new(&Settings {
             num_inputs: 2,
             num_outputs: 2,
-            population_size: 200,
-            target_species: 10,
+            population_size: 300,
+            target_species: 7,
             parameters: Parameters {
-                specie_greediness_exponent: 1.5,
-                start_with_bias_connections: false,
+                specie_greediness_exponent: 4.5,
+                start_with_bias_connections: true,
                 specie_threshold_nudge_factor: 0.5,
                 activation_function: ActivationFunction::Tanh,
                 ..default()
@@ -162,6 +180,7 @@ fn handle_agents(
     mut q: Query<(&mut Brain, &mut ExternalForce, &Transform)>,
     mut target: Query<&mut Transform, (With<Target>, Without<Brain>)>,
     mut neat: ResMut<Neat>,
+    mut fitness_plot: ResMut<FitnessPlot>,
 ) {
     let target = &mut target.single_mut().translation;
     for (mut brain, mut forces, transform) in q.iter_mut() {
@@ -177,19 +196,57 @@ fn handle_agents(
         forces.force.z = 6.0 * outputs[1] as f32;
     }
 
-    const SIMULATION_LENGTH: usize = (70.0 * SIMULATION_SPEED) as usize;
+    const SIMULATION_LENGTH: usize = (400.0 / SIMULATION_SPEED) as usize;
 
     neat.ticks += 1;
     if neat.ticks % SIMULATION_LENGTH == 0 {
         for (agent_idx, agent_entity) in neat.agents.clone().iter().cloned().enumerate() {
             let transform = q.get(agent_entity).unwrap().2;
-            neat.pop.members[agent_idx].fitness +=
-                (40.0 - transform.translation.distance(*target) as f64).max(0.0);
+            if transform.translation.y > 0.0 {
+                neat.pop.members[agent_idx].fitness +=
+                    (40.0 - transform.translation.distance(*target) as f64).max(0.0);
+            }
         }
         if neat.ticks % (5 * SIMULATION_LENGTH) == 0 {
+            fitness_plot
+                .max_fitness
+                .push_back(neat.pop.get_winner().fitness);
+            fitness_plot.avg_fitness.push_back(
+                neat.pop.members.iter().map(|x| x.fitness).sum::<f64>()
+                    / neat.pop.members.len() as f64,
+            );
             neat.pop.evolve();
             neat.ticks = 0;
         }
         writer.send(ResetEvent);
     }
+}
+
+fn draw_plot(mut contexts: EguiContexts, plot_data: Res<FitnessPlot>) {
+    let ctx = contexts.ctx_mut();
+
+    // Draw plot inside a window.
+    egui::Window::new("Fitness")
+        .movable(true)
+        .show(ctx, |ui| {
+            Plot::new("max fitness")
+                .view_aspect(2.0)
+                .show(ui, |plot_ui| {
+                    let max_points = plot_data
+                        .max_fitness
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| PlotPoint { x: i as f64, y: *v })
+                        .collect::<Vec<_>>();
+                    plot_ui.line(Line::new(PlotPoints::Owned(max_points)).color(Color32::GREEN).name("max"));
+
+                    let avg_points = plot_data
+                        .avg_fitness
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| PlotPoint { x: i as f64, y: *v })
+                        .collect::<Vec<_>>();
+                    plot_ui.line(Line::new(PlotPoints::Owned(avg_points)).color(Color32::YELLOW).name("avg"))
+                });
+        });
 }

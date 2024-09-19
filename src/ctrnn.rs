@@ -24,7 +24,7 @@ impl Ctrnn {
     ) -> Ctrnn {
         Ctrnn {
             y: Matrix::zeros(num_neurons, 1),
-            tau: Matrix::new(num_neurons, 1, vec![0.1; num_neurons]),
+            tau: Matrix::new(num_neurons, 1, vec![1.0; num_neurons]),
             wji: Matrix::zeros(num_neurons, num_neurons),
             theta: Matrix::zeros(num_neurons, 1),
             i: Matrix::zeros(num_neurons, 1),

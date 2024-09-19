@@ -4,10 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = "0.14.2"
-bevy_rapier3d = "0.27.0"
 rand = "0.8.5"
 rulinalg = "0.4.2"
+
+[dev-dependencies]
+bevy = "0.14.2"
+bevy_egui = "0.29.0"
+bevy_rapier3d = "0.27.0"
+egui_plot = "0.28.1"
+
 
 [profile.release]
 debug = true

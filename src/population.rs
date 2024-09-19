@@ -77,7 +77,6 @@ impl Population {
                     neuron_to,
                     weight: rand::thread_rng().gen_range(-1.0..1.0),
                     enabled: true,
-                    from_is_bias: true,
                 });
             }
         }
@@ -164,12 +163,16 @@ impl Population {
             self.settings.parameters.activation_function.clone(),
         );
 
+        for (neuron_id, neuron) in genome.neurons.iter() {
+            ctrnn.tau.mut_data()[*neuron_id] = neuron.tau;
+            if neuron.is_bias {
+                ctrnn.theta.mut_data()[*neuron_id] = 1.0;
+            }
+        }
+
         for (_, gene) in genome.genes.iter() {
             if gene.enabled {
                 ctrnn.wji.mut_data()[gene.neuron_to * num_neurons + gene.neuron_from] = gene.weight;
-                if gene.from_is_bias {
-                    ctrnn.theta.mut_data()[gene.neuron_from] = 1.0f64;
-                }
             }
         }
 
@@ -190,6 +193,18 @@ impl Population {
             }
         }
 
+        if rng.gen::<f64>() < params.mutate_genome_tau_change {
+            for neuron in genome.neurons.values_mut() {
+                if rng.gen::<f64>() < params.mutate_neuron_tau_change {
+                    let nudge = rng.gen_range(
+                        -params.mutate_neuron_tau_nudge_factor
+                            ..params.mutate_neuron_tau_nudge_factor,
+                    );
+                    neuron.tau = (neuron.tau + nudge).max(0.01);
+                }
+            }
+        }
+
         for gene in genome.genes.values_mut() {
             if rng.gen::<f64>() < params.mutate_gene_toggle_expression {
                 gene.enabled = !gene.enabled;
@@ -197,8 +212,8 @@ impl Population {
         }
 
         if rng.gen::<f64>() < params.mutate_genome_add_connection {
-            let neuron_from = genome.sample_neuron();
-            let neuron_to = genome.sample_neuron();
+            let neuron_from = genome.sample_neuron_id();
+            let neuron_to = genome.sample_neuron_id();
             let innovation_number = self.next_innovation_number(neuron_from, neuron_to);
             let weight = rng.gen_range(-10.0..10.0);
 
@@ -208,7 +223,6 @@ impl Population {
                 neuron_to,
                 weight,
                 enabled: true,
-                from_is_bias: self.is_bias_neuron(neuron_from),
             });
         }
 
@@ -227,7 +241,6 @@ impl Population {
                 neuron_to: new_neuron_id,
                 weight: 1.0,
                 enabled: true,
-                from_is_bias: gene_to_split.from_is_bias,
             };
 
             // A new connection from the new neuron with the orignal weight
@@ -238,16 +251,11 @@ impl Population {
                 neuron_to: gene_to_split.neuron_to,
                 weight: gene_to_split.weight,
                 enabled: true,
-                from_is_bias: false,
             };
 
             genome.add_gene(connection_to);
             genome.add_gene(connection_from);
         }
-    }
-
-    fn is_bias_neuron(&self, neuron: usize) -> bool {
-        return neuron == self.settings.num_inputs;
     }
 
     pub fn crossover(&self, lhs: &Genome, rhs: &Genome) -> Genome {
@@ -258,13 +266,18 @@ impl Population {
             a.innovation_number.cmp(&b.innovation_number)
         }) {
             match (l, r) {
-                // TODO: preset chance that a gene is disabled if it is disabled in either parent
                 (Some(l), Some(r)) => {
-                    if rng.gen::<bool>() {
-                        child.add_gene(l.clone());
+                    let mut new_gene = if rng.gen::<bool>() {
+                        l.clone()
                     } else {
-                        child.add_gene(r.clone());
+                        r.clone()
+                    };
+
+                    if (!l.enabled || !r.enabled) && rng.gen::<f32>() < 0.5 {
+                        new_gene.enabled = false
                     }
+
+                    child.add_gene(new_gene);
                 }
                 (Some(l), None) => {
                     if lhs.fitness > rhs.fitness {
@@ -277,6 +290,13 @@ impl Population {
                     }
                 }
                 (None, None) => unreachable!(),
+            }
+        }
+
+        // ensure we keep the tau values of the fittest parent
+        for (neuron_idx, neuron) in &(if lhs.fitness > rhs.fitness { lhs } else { rhs }).neurons {
+            if let Some(child_neuron) = child.neurons.get_mut(neuron_idx) {
+                *child_neuron = neuron.clone();
             }
         }
 

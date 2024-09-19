@@ -1,6 +1,5 @@
-use std::collections::{BTreeMap, HashSet};
-
 use rand::Rng;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::params::*;
 use crate::population::full_sorted_outer_join;
@@ -12,7 +11,12 @@ pub struct Gene {
     pub neuron_to: usize,
     pub weight: f64,
     pub enabled: bool,
-    pub from_is_bias: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct Neuron {
+    pub tau: f64,
+    pub is_bias: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -20,7 +24,7 @@ pub struct Genome {
     // innovation number -> Gene
     pub genes: BTreeMap<usize, Gene>,
     all_innovation_numbers: Vec<usize>,
-    all_neurons: HashSet<usize>,
+    pub neurons: HashMap<usize, Neuron>,
     pub fitness: f64,
     max_neuron_id: usize,
     pub specie_idx: Option<usize>,
@@ -28,16 +32,22 @@ pub struct Genome {
 
 impl Genome {
     pub fn empty(settings: &Settings) -> Genome {
-        let mut all_neurons = HashSet::new();
+        let mut all_neurons = HashMap::new();
         let mut max_neuron_id = 0;
         for i in 0..settings.num_inputs + 1 + settings.num_outputs {
-            all_neurons.insert(i);
+            all_neurons.insert(
+                i,
+                Neuron {
+                    tau: 0.1,
+                    is_bias: i == settings.num_inputs,
+                },
+            );
             max_neuron_id = max_neuron_id.max(i);
         }
         return Genome {
             genes: BTreeMap::new(),
             all_innovation_numbers: Vec::new(),
-            all_neurons,
+            neurons: all_neurons,
             max_neuron_id,
             fitness: 0.0,
             specie_idx: None,
@@ -63,8 +73,24 @@ impl Genome {
             self.max_neuron_id = gene.neuron_to;
         }
 
-        self.all_neurons.insert(gene.neuron_from);
-        self.all_neurons.insert(gene.neuron_to);
+        if !self.neurons.contains_key(&gene.neuron_from) {
+            self.neurons.insert(
+                gene.neuron_from,
+                Neuron {
+                    tau: 0.1,
+                    is_bias: false,
+                },
+            );
+        }
+        if !self.neurons.contains_key(&gene.neuron_to) {
+            self.neurons.insert(
+                gene.neuron_to,
+                Neuron {
+                    tau: 0.1,
+                    is_bias: false,
+                },
+            );
+        }
         self.all_innovation_numbers.push(gene.innovation_number);
         self.genes.insert(gene.innovation_number, gene);
     }
@@ -80,11 +106,11 @@ impl Genome {
         self.genes.get_mut(&innov_number).unwrap()
     }
 
-    pub fn sample_neuron(&self) -> usize {
+    pub fn sample_neuron_id(&self) -> usize {
         let mut rng = rand::thread_rng();
-        let idx = rng.gen_range(0..self.all_neurons.len());
-        self.all_neurons
-            .iter()
+        let idx = rng.gen_range(0..self.neurons.len());
+        self.neurons
+            .keys()
             .skip(idx)
             .take(1)
             .next()
@@ -117,8 +143,11 @@ impl Genome {
     }
 
     pub fn print_dot(&self) {
-        for neuron in &self.all_neurons {
-            println!("n{}", neuron)
+        for (neuron_idx, neuron) in self.neurons.iter() {
+            println!(
+                "n{} [label=\"n{} {:.2}\"]",
+                neuron_idx, neuron_idx, neuron.tau
+            )
         }
         for gene in self.genes.values() {
             if gene.enabled {
