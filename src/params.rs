@@ -39,13 +39,13 @@ pub struct Parameters {
 impl Default for Parameters {
     fn default() -> Self {
         Parameters {
-            mutate_genome_add_connection: 0.08,
-            mutate_genome_add_neuron: 0.06,
+            mutate_genome_add_connection: 0.06,
+            mutate_genome_add_neuron: 0.04,
             mutate_genome_add_bias_neuron: 0.02,
             mutate_genome_weight_change: 0.8,
             mutate_gene_weight_change: 0.9,
             mutate_gene_nudge_factor: 1.5,
-            mutate_genome_tau_change: 0.8,
+            mutate_genome_tau_change: 0.3,
             mutate_neuron_tau_change: 0.5,
             mutate_neuron_tau_nudge_factor: 0.05,
             mutate_gene_toggle_expression: 0.05,

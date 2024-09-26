@@ -8,7 +8,7 @@ use bevy_egui::{
 
 use bevy_rapier3d::prelude::*;
 use egui_plot::{Line, Plot, PlotPoint, PlotPoints};
-use genome::{
+use fastneat::{
     ctrnn::Ctrnn,
     params::{ActivationFunction, Parameters, Settings},
     population::Population,

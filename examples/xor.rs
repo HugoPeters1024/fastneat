@@ -1,5 +1,5 @@
-use genome::params::*;
-use genome::population::*;
+use fastneat::params::*;
+use fastneat::population::*;
 
 const XOR_RESULTS: [((f64, f64), f64); 4] = [
     ((0.0, 0.0), 0.0),
@@ -12,13 +12,12 @@ fn main() {
     let settings = Settings {
         num_inputs: 2,
         num_outputs: 1,
-        population_size: 100,
-        target_species: 2,
+        population_size: 200,
+        target_species: 5,
         parameters: Parameters {
-            mutate_genome_add_connection: 0.2,
-            mutate_genome_add_neuron: 0.1,
             specie_greediness_exponent: 3.5,
             specie_dropoff_age: 15,
+            enable_elitism: true,
             ..Default::default()
         },
     };
@@ -38,7 +37,7 @@ fn main() {
 
     for ((inputs, outputs), _) in XOR_RESULTS {
         let mut i = population.get_phenotype(&genome);
-        for _ in 0..20 {
+        for _ in 0..10 {
             i.update(0.2, &vec![inputs, outputs]);
         }
         println!("{} XOR {} = {}", inputs, outputs, i.get_outputs()[0]);
@@ -52,11 +51,11 @@ fn eval_population(population: &mut Population) {
         (&mut population.members[genome_idx]).fitness = 0.0;
         for ((lhs, rhs), expected) in XOR_RESULTS.iter() {
             let mut network = population.get_phenotype(&population.members[genome_idx]);
-            for _ in 0..20 {
+            for _ in 0..10 {
                 network.update(0.2, &vec![*lhs, *rhs]);
             }
             let output = network.get_outputs()[0];
-            (&mut population.members[genome_idx]).fitness += 1.0 - (output - expected).powi(2);
+            (&mut population.members[genome_idx]).fitness += 1.0 - (output - expected).abs();
         }
     }
 }

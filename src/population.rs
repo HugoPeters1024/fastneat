@@ -178,7 +178,7 @@ impl Population {
                         -params.mutate_neuron_tau_nudge_factor
                             ..params.mutate_neuron_tau_nudge_factor,
                     );
-                    neuron.tau = (neuron.tau + nudge).max(0.01);
+                    neuron.tau = (neuron.tau + nudge).max(0.005);
                 }
             }
         }

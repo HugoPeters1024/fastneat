@@ -1889,6 +1889,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastneat"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_egui",
+ "bevy_rapier3d",
+ "egui_plot",
+ "rand",
+ "rulinalg",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1990,18 +2002,6 @@ dependencies = [
  "futures-io",
  "parking",
  "pin-project-lite",
-]
-
-[[package]]
-name = "genome"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "bevy_egui",
- "bevy_rapier3d",
- "egui_plot",
- "rand",
- "rulinalg",
 ]
 
 [[package]]
