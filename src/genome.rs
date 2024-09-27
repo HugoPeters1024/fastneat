@@ -39,7 +39,7 @@ impl Genome {
                 i,
                 Neuron {
                     tau: 0.1,
-                    is_bias: false
+                    is_bias: false,
                 },
             );
             max_neuron_id = max_neuron_id.max(i);

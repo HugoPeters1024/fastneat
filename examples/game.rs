@@ -225,27 +225,33 @@ fn draw_plot(mut contexts: EguiContexts, plot_data: Res<FitnessPlot>) {
     let ctx = contexts.ctx_mut();
 
     // Draw plot inside a window.
-    egui::Window::new("Fitness")
-        .movable(true)
-        .show(ctx, |ui| {
-            Plot::new("max fitness")
-                .view_aspect(2.0)
-                .show(ui, |plot_ui| {
-                    let max_points = plot_data
-                        .max_fitness
-                        .iter()
-                        .enumerate()
-                        .map(|(i, v)| PlotPoint { x: i as f64, y: *v })
-                        .collect::<Vec<_>>();
-                    plot_ui.line(Line::new(PlotPoints::Owned(max_points)).color(Color32::GREEN).name("max"));
+    egui::Window::new("Fitness").movable(true).show(ctx, |ui| {
+        Plot::new("max fitness")
+            .view_aspect(2.0)
+            .show(ui, |plot_ui| {
+                let max_points = plot_data
+                    .max_fitness
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| PlotPoint { x: i as f64, y: *v })
+                    .collect::<Vec<_>>();
+                plot_ui.line(
+                    Line::new(PlotPoints::Owned(max_points))
+                        .color(Color32::GREEN)
+                        .name("max"),
+                );
 
-                    let avg_points = plot_data
-                        .avg_fitness
-                        .iter()
-                        .enumerate()
-                        .map(|(i, v)| PlotPoint { x: i as f64, y: *v })
-                        .collect::<Vec<_>>();
-                    plot_ui.line(Line::new(PlotPoints::Owned(avg_points)).color(Color32::YELLOW).name("avg"))
-                });
-        });
+                let avg_points = plot_data
+                    .avg_fitness
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| PlotPoint { x: i as f64, y: *v })
+                    .collect::<Vec<_>>();
+                plot_ui.line(
+                    Line::new(PlotPoints::Owned(avg_points))
+                        .color(Color32::YELLOW)
+                        .name("avg"),
+                )
+            });
+    });
 }

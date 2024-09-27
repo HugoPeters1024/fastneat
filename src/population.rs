@@ -240,15 +240,20 @@ impl Population {
             let connect_to = genome.sample_neuron_id();
 
             let connection = Gene {
-                innovation_number: self
-                    .next_innovation_number(new_neuron_id, connect_to),
+                innovation_number: self.next_innovation_number(new_neuron_id, connect_to),
                 neuron_from: new_neuron_id,
                 neuron_to: connect_to,
                 weight: 1.0,
                 enabled: true,
             };
 
-            genome.add_neuron(new_neuron_id, Neuron { tau: 0.1, is_bias: true });
+            genome.add_neuron(
+                new_neuron_id,
+                Neuron {
+                    tau: 0.1,
+                    is_bias: true,
+                },
+            );
             genome.add_gene(connection);
         }
     }

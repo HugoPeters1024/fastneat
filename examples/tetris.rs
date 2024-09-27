@@ -1,9 +1,11 @@
 //! Renders a 2D scene containing a single, moving sprite.
+
 use bevy::{
     prelude::*,
     sprite::{MaterialMesh2dBundle, Mesh2dHandle},
 };
 use bevy_editor_pls::prelude::*;
+use fastneat::{ctrnn::Ctrnn, params::Settings, population::Population};
 
 fn main() {
     App::new()
@@ -22,8 +24,21 @@ struct AllAssets {
 
 struct Piece {
     kind: usize,
-    x: usize,
-    y: usize,
+    x: isize,
+    y: isize,
+    rot: isize,
+}
+
+impl Piece {
+    fn get_rot(&self) -> usize {
+        self.rot.rem_euclid(4) as usize
+    }
+}
+
+#[derive(Component)]
+enum Controller {
+    Human,
+    AI(Ctrnn),
 }
 
 #[derive(Component)]
@@ -32,6 +47,18 @@ struct Game {
     width: usize,
     height: usize,
     current_piece: Piece,
+}
+
+#[derive(Clone, Copy)]
+enum MoveInstr {
+    GoLeft,
+    GoRight,
+}
+
+#[derive(Clone, Copy)]
+enum RotateInstr {
+    Clockwise,
+    Counterwise,
 }
 
 impl Game {
@@ -44,37 +71,80 @@ impl Game {
                 kind: 0,
                 x: 0,
                 y: 0,
+                rot: 0,
             },
         }
     }
 
-    pub fn get(&self, x: usize, y: usize) -> bool {
+    pub fn get(&self, x: isize, y: isize) -> bool {
+        if x < 0 || y < 0 || x >= self.width as isize || y >= self.height as isize {
+            return true;
+        }
+        let x = x as usize;
+        let y = y as usize;
         self.board[self.width * y + x]
     }
 
-    pub fn set(&mut self, x: usize, y: usize) {
+    pub fn set(&mut self, x: isize, y: isize) {
+        if x < 0 || y < 0 || x >= self.width as isize || y >= self.height as isize {
+            return;
+        }
+        let x = x as usize;
+        let y = y as usize;
         self.board[self.width * y + x] = true;
     }
 
-    pub fn tick(&mut self) {
-        let mut conflict = false;
-        'outer: for dy in 0..3 {
+    pub fn in_conflict(&self) -> bool {
+        for dy in 0..3 {
             for dx in 0..3 {
-                let x = self.current_piece.x + dx;
-                let y = self.current_piece.y + dy + 1;
-                if PIECES[self.current_piece.kind][dy * 3 + dx] == '#' && self.get(x, y) {
-                    conflict = true;
-                    break 'outer;
+                let x = self.current_piece.x + dx as isize;
+                let y = self.current_piece.y + dy as isize;
+                if PIECES[self.current_piece.kind][self.current_piece.get_rot()][dy * 3 + dx] == '#'
+                    && self.get(x, y)
+                {
+                    return true;
                 }
             }
         }
 
-        if conflict {
+        return false;
+    }
+
+    pub fn tick_input(&mut self, move_instr: Option<MoveInstr>, rotate_instr: Option<RotateInstr>) {
+        let horz_move: isize = match move_instr {
+            None => 0,
+            Some(MoveInstr::GoRight) => 1,
+            Some(MoveInstr::GoLeft) => -1,
+        };
+
+        self.current_piece.x += horz_move;
+        if self.in_conflict() {
+            self.current_piece.x -= horz_move;
+        }
+
+        let rot_move: isize = match rotate_instr {
+            None => 0,
+            Some(RotateInstr::Clockwise) => 1,
+            Some(RotateInstr::Counterwise) => -1,
+        };
+
+        self.current_piece.rot += rot_move;
+        if self.in_conflict() {
+            self.current_piece.rot -= rot_move;
+        }
+    }
+
+    pub fn tick_gravity(&mut self) {
+        self.current_piece.y += 1;
+        if self.in_conflict() {
+            self.current_piece.y -= 1;
             for dy in 0..3 {
                 for dx in 0..3 {
-                    let x = self.current_piece.x + dx;
-                    let y = self.current_piece.y + dy;
-                    if PIECES[self.current_piece.kind][dy * 3 + dx] == '#' {
+                    let x = self.current_piece.x + dx as isize;
+                    let y = self.current_piece.y + dy as isize;
+                    if PIECES[self.current_piece.kind][self.current_piece.get_rot()][dy * 3 + dx]
+                        == '#'
+                    {
                         self.set(x, y);
                     }
                 }
@@ -84,8 +154,6 @@ impl Game {
             self.current_piece.y = 0;
             self.current_piece.kind += 1;
             self.current_piece.kind %= PIECES.len();
-        } else {
-            self.current_piece.y += 1;
         }
     }
 }
@@ -98,7 +166,18 @@ struct GameRender {
     game_to_render: Option<Entity>,
 }
 
-const PIECES: [[char; 9]; 7] = [
+impl GameRender {
+    pub fn get_entity(&self, x: isize, y: isize) -> Option<Entity> {
+        if x < 0 || y < 0 || x >= self.width as isize || y >= self.height as isize {
+            return None;
+        }
+        let x = x as usize;
+        let y = y as usize;
+        return Some(self.board[self.width * y + x]);
+    }
+}
+
+const BASE_PIECES: [[char; 9]; 7] = [
     ['.', '#', '.', '.', '#', '.', '.', '#', '.'], // i block
     ['#', '#', '.', '#', '#', '.', '.', '.', '.'], // o block
     ['.', '#', '.', '#', '#', '#', '.', '.', '.'], // t block
@@ -107,6 +186,43 @@ const PIECES: [[char; 9]; 7] = [
     ['.', '#', '#', '#', '#', '.', '.', '.', '.'], // s block
     ['#', '#', '.', '.', '#', '#', '.', '.', '.'], // z block
 ];
+
+const PIECES: [[[char; 9]; 4]; 7] = [
+    all_rotations(&BASE_PIECES[0]),
+    all_rotations(&BASE_PIECES[1]),
+    all_rotations(&BASE_PIECES[2]),
+    all_rotations(&BASE_PIECES[3]),
+    all_rotations(&BASE_PIECES[4]),
+    all_rotations(&BASE_PIECES[5]),
+    all_rotations(&BASE_PIECES[6]),
+];
+
+const fn all_rotations(piece: &[char; 9]) -> [[char; 9]; 4] {
+    let mut ret = [['.'; 9]; 4];
+    let mut piece = *piece;
+    let mut i = 0;
+    while i < 4 {
+        ret[i] = piece;
+        piece = rotate_clockwise(&piece);
+        i += 1;
+    }
+
+    return ret;
+}
+
+const fn rotate_clockwise(piece: &[char; 9]) -> [char; 9] {
+    [
+        piece[6], piece[3], piece[0], // 0
+        piece[7], piece[4], piece[1], // 1
+        piece[8], piece[5], piece[2], // 3
+    ]
+}
+
+#[derive(Resource)]
+struct NeatState {
+    pop: Population,
+    agents: Vec<Entity>,
+}
 
 fn setup(
     mut commands: Commands,
@@ -121,11 +237,6 @@ fn setup(
 
     let width = 10;
     let height = 20;
-    let mut game = Game::new(width, height);
-
-    for i in 0..10 {
-        game.set(9 - i, 9 + i);
-    }
 
     let mut render = GameRender {
         board: Vec::new(),
@@ -140,8 +251,8 @@ fn setup(
             InheritedVisibility::default(),
         ))
         .with_children(|parent| {
-            for y in 0..game.height {
-                for x in 0..game.width {
+            for y in 0..height {
+                for x in 0..width {
                     let color = Color::WHITE;
 
                     render.board.push(
@@ -158,10 +269,35 @@ fn setup(
             }
         });
 
-    let game = commands.spawn(game).id();
-    render.game_to_render = Some(game);
-
     commands.insert_resource(all_assets);
+
+    const POP_SIZE: usize = 100;
+    let pop = Population::new(&Settings {
+        population_size: POP_SIZE,
+        target_species: 1,
+        num_inputs: width * height,
+        num_outputs: 2,
+        parameters: fastneat::params::Parameters {
+            activation_function: fastneat::params::ActivationFunction::Tanh,
+            ..default()
+        },
+    });
+
+    let mut agents = Vec::new();
+    for agent_idx in 0..POP_SIZE {
+        let genome = &pop.members[agent_idx];
+        let network = pop.get_phenotype(&genome);
+        agents.push(
+            commands
+                .spawn((Game::new(width, height), Controller::AI(network)))
+                .id(),
+        );
+    }
+
+    render.game_to_render = Some(agents[0].clone());
+
+    commands.insert_resource(NeatState { pop, agents });
+
     commands.insert_resource(render);
 }
 
@@ -179,7 +315,7 @@ fn render_game(
         for x in 0..game.width {
             let block_entity = render.board[y * game.width + x];
             *visibility.get_mut(block_entity).unwrap() = Visibility::Hidden;
-            if game.get(x, y) {
+            if game.get(x as isize, y as isize) {
                 *visibility.get_mut(block_entity).unwrap() = Visibility::Visible
             }
         }
@@ -187,30 +323,85 @@ fn render_game(
 
     for dx in 0..3 {
         for dy in 0..3 {
-            let x = game.current_piece.x + dx;
-            let y = game.current_piece.y + dy;
-            let block_entity = render.board[y * game.width + x];
-            if PIECES[game.current_piece.kind][dy * 3 + dx] == '#' {
-                *visibility.get_mut(block_entity).unwrap() = Visibility::Visible
+            let x = game.current_piece.x + dx as isize;
+            let y = game.current_piece.y + dy as isize;
+            if PIECES[game.current_piece.kind][game.current_piece.get_rot()][dy * 3 + dx] == '#' {
+                if let Some(block_entity) = render.get_entity(x, y) {
+                    *visibility.get_mut(block_entity).unwrap() = Visibility::Visible
+                }
             }
         }
     }
 }
 
-fn tick_games(mut games: Query<&mut Game>, mut ticks: Local<usize>, keyboard: Res<ButtonInput<KeyCode>>) {
+fn tick_games(
+    mut games: Query<(&mut Game, &mut Controller)>,
+    mut ticks: Local<usize>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut human_move_instr: Local<Option<MoveInstr>>,
+    mut human_rotate_instr: Local<Option<RotateInstr>>,
+    neat: Res<NeatState>,
+) {
     *ticks += 1;
-    if *ticks < 38 {
-        return;
-    }
-    *ticks = 0;
 
-    for mut game in games.iter_mut() {
-        if keyboard.pressed(KeyCode::ArrowRight) {
-            game.current_piece.x += 1;
+    if keyboard.just_pressed(KeyCode::ArrowRight) {
+        *human_move_instr = Some(MoveInstr::GoRight);
+    }
+    if keyboard.just_pressed(KeyCode::ArrowLeft) {
+        *human_move_instr = Some(MoveInstr::GoLeft);
+    }
+    if keyboard.just_pressed(KeyCode::KeyW) || keyboard.just_pressed(KeyCode::ArrowUp) {
+        *human_rotate_instr = Some(RotateInstr::Clockwise);
+    }
+    if keyboard.just_pressed(KeyCode::KeyQ) {
+        *human_rotate_instr = Some(RotateInstr::Counterwise);
+    }
+
+    for (mut game, controller) in games.iter_mut() {
+        let mut move_instr = None;
+        let mut rotate_instr = None;
+        match controller.into_inner() {
+            Controller::Human => {
+                move_instr = *human_move_instr;
+                rotate_instr = *human_rotate_instr;
+            }
+            Controller::AI(network) => {
+                let mut inputs = vec![-1.0; game.width * game.height];
+                for y in 0..game.height {
+                    for x in 0..game.width {
+                        if game.get(x as isize, y as isize) {
+                            inputs[y * game.width + x] = 1.0;
+                        }
+                    }
+                }
+                network.update(0.1, &inputs);
+
+                let outputs = network.get_outputs();
+                if outputs[0] < -0.9 {
+                    move_instr = Some(MoveInstr::GoLeft)
+                }
+                if outputs[0] > 0.9 {
+                    move_instr = Some(MoveInstr::GoRight)
+                }
+
+                if outputs[1] < -0.9 {
+                    rotate_instr = Some(RotateInstr::Counterwise)
+                }
+
+                if outputs[1] > 0.9 {
+                    rotate_instr = Some(RotateInstr::Clockwise)
+                }
+            }
         }
-        if keyboard.pressed(KeyCode::ArrowLeft) {
-            game.current_piece.x -= 1;
+
+        if *ticks % 7 == 0 {
+            game.tick_input(move_instr, rotate_instr);
+            *human_move_instr = None;
+            *human_rotate_instr = None;
         }
-        game.tick();
+
+        if *ticks % 14 == 0 {
+            game.tick_gravity();
+        }
     }
 }
