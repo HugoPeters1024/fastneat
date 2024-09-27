@@ -1,10 +1,9 @@
-use std::collections::VecDeque;
-
 use bevy::prelude::*;
 use bevy_egui::{
     egui::{self, Color32},
     EguiContexts, EguiPlugin,
 };
+use std::collections::VecDeque;
 
 use bevy_rapier3d::prelude::*;
 use egui_plot::{Line, Plot, PlotPoint, PlotPoints};

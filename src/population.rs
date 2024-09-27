@@ -191,7 +191,11 @@ impl Population {
 
         if rng.gen::<f64>() < params.mutate_genome_add_connection {
             let neuron_from = genome.sample_neuron_id();
-            let neuron_to = genome.sample_neuron_id();
+            let neuron_to = if params.allow_recurrent_inputs {
+                genome.sample_neuron_id()
+            } else {
+                genome.sample_neuron_id_no_input(self.settings.num_inputs)
+            };
             let innovation_number = self.next_innovation_number(neuron_from, neuron_to);
             let weight = rng.gen_range(-10.0..10.0);
 
@@ -237,7 +241,11 @@ impl Population {
 
         if rng.gen::<f64>() < params.mutate_genome_add_bias_neuron {
             let new_neuron_id = genome.get_num_neurons();
-            let connect_to = genome.sample_neuron_id();
+            let connect_to = if params.allow_recurrent_inputs {
+                genome.sample_neuron_id()
+            } else {
+                genome.sample_neuron_id_no_input(self.settings.num_inputs)
+            };
 
             let connection = Gene {
                 innovation_number: self.next_innovation_number(new_neuron_id, connect_to),

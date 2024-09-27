@@ -122,6 +122,18 @@ impl Genome {
             .clone()
     }
 
+    pub fn sample_neuron_id_no_input(&self, num_inputs: usize) -> usize {
+        let mut rng = rand::thread_rng();
+        let idx = rng.gen_range(num_inputs..self.neurons.len());
+        self.neurons
+            .keys()
+            .skip(idx)
+            .take(1)
+            .next()
+            .unwrap()
+            .clone()
+    }
+
     pub fn compatibility(&self, other: &Genome, genes_factor: f64, weight_factor: f64) -> f64 {
         let mut num_mismatch = 0.0;
         let mut weight_diff_sum = 0.0;

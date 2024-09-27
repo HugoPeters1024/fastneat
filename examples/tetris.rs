@@ -1,21 +1,39 @@
-//! Renders a 2D scene containing a single, moving sprite.
+use std::{collections::VecDeque, sync::Mutex};
 
 use bevy::{
     prelude::*,
     sprite::{MaterialMesh2dBundle, Mesh2dHandle},
 };
-use bevy_editor_pls::prelude::*;
+use bevy_egui::{
+    egui::{self, Color32},
+    EguiContexts, EguiPlugin,
+};
+use egui_plot::{Line, Plot, PlotPoint, PlotPoints};
 use fastneat::{ctrnn::Ctrnn, params::Settings, population::Population};
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(EditorPlugin::default())
+        //.add_plugins(EditorPlugin::default())
+        .add_plugins(EguiPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, render_game)
+        .add_systems(Update, draw_plot)
         .add_systems(FixedUpdate, tick_games)
+        .add_systems(FixedUpdate, handle_reset)
+        .add_event::<ResetEvent>()
+        .insert_resource(Time::<Fixed>::from_hz(196.0))
         .run();
 }
+
+#[derive(Resource, Default)]
+struct PlotData {
+    max_fitness: VecDeque<f64>,
+    avg_fitness: VecDeque<f64>,
+}
+
+#[derive(Event)]
+struct ResetEvent;
 
 #[derive(Resource)]
 struct AllAssets {
@@ -38,15 +56,17 @@ impl Piece {
 #[derive(Component)]
 enum Controller {
     Human,
-    AI(Ctrnn),
+    AI((Ctrnn, usize)),
 }
 
 #[derive(Component)]
 struct Game {
-    board: Vec<bool>,
+    board: Vec<Cell>,
     width: usize,
     height: usize,
     current_piece: Piece,
+    highest_set_y: usize,
+    age: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -61,10 +81,16 @@ enum RotateInstr {
     Counterwise,
 }
 
+#[derive(Clone)]
+enum Cell {
+    Empty,
+    Filled(usize),
+}
+
 impl Game {
     pub fn new(width: usize, height: usize) -> Self {
         Game {
-            board: vec![false; width * height],
+            board: vec![Cell::Empty; width * height],
             width,
             height,
             current_piece: Piece {
@@ -73,6 +99,8 @@ impl Game {
                 y: 0,
                 rot: 0,
             },
+            highest_set_y: 10,
+            age: 0,
         }
     }
 
@@ -82,7 +110,7 @@ impl Game {
         }
         let x = x as usize;
         let y = y as usize;
-        self.board[self.width * y + x]
+        matches!(self.board[self.width * y + x], Cell::Filled(_))
     }
 
     pub fn set(&mut self, x: isize, y: isize) {
@@ -91,7 +119,8 @@ impl Game {
         }
         let x = x as usize;
         let y = y as usize;
-        self.board[self.width * y + x] = true;
+        self.board[self.width * y + x] = Cell::Filled(self.age);
+        self.highest_set_y = self.highest_set_y.min(y);
     }
 
     pub fn in_conflict(&self) -> bool {
@@ -108,6 +137,23 @@ impl Game {
         }
 
         return false;
+    }
+
+    pub fn occupancy_score(&self) -> f64 {
+        let mut ret = 0.0;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let cell = &self.board[self.width * y + x];
+                match cell {
+                    Cell::Empty => {}
+                    Cell::Filled(_) => {
+                        ret += (y * y) as f64 / (self.height * self.height) as f64;
+                    }
+                }
+            }
+        }
+
+        ret
     }
 
     pub fn tick_input(&mut self, move_instr: Option<MoveInstr>, rotate_instr: Option<RotateInstr>) {
@@ -136,6 +182,7 @@ impl Game {
 
     pub fn tick_gravity(&mut self) {
         self.current_piece.y += 1;
+        self.age += 1;
         if self.in_conflict() {
             self.current_piece.y -= 1;
             for dy in 0..3 {
@@ -150,7 +197,7 @@ impl Game {
                 }
             }
 
-            self.current_piece.x = 0;
+            self.current_piece.x = 3;
             self.current_piece.y = 0;
             self.current_piece.kind += 1;
             self.current_piece.kind %= PIECES.len();
@@ -247,7 +294,10 @@ fn setup(
 
     commands
         .spawn((
-            TransformBundle::from_transform(Transform::from_scale(Vec3::new(32.0, -32.0, 1.0))),
+            TransformBundle::from_transform(
+                Transform::from_scale(Vec3::new(32.0, -32.0, 1.0))
+                    .with_translation(Vec3::new(0.0, 200.0, 0.0)),
+            ),
             InheritedVisibility::default(),
         ))
         .with_children(|parent| {
@@ -274,24 +324,40 @@ fn setup(
     const POP_SIZE: usize = 100;
     let pop = Population::new(&Settings {
         population_size: POP_SIZE,
-        target_species: 1,
+        target_species: 5,
         num_inputs: width * height,
         num_outputs: 2,
         parameters: fastneat::params::Parameters {
+            mutate_genome_add_neuron: 0.2,
+            mutate_genome_add_connection: 0.9,
+            mutate_genome_add_bias_neuron: 0.3,
             activation_function: fastneat::params::ActivationFunction::Tanh,
+            allow_recurrent_inputs: true,
+            specie_threshold_nudge_factor: 3.0,
+            specie_dropoff_age: 45,
             ..default()
         },
     });
 
     let mut agents = Vec::new();
+    let mut agent_most_conns = 0;
+    let mut most_cons = 0;
     for agent_idx in 0..POP_SIZE {
         let genome = &pop.members[agent_idx];
         let network = pop.get_phenotype(&genome);
         agents.push(
             commands
-                .spawn((Game::new(width, height), Controller::AI(network)))
+                .spawn((
+                    Game::new(width, height),
+                    Controller::AI((network, agent_idx)),
+                ))
                 .id(),
         );
+
+        if genome.genes.len() > most_cons {
+            most_cons = genome.genes.len();
+            agent_most_conns = agent_idx;
+        }
     }
 
     render.game_to_render = Some(agents[0].clone());
@@ -299,6 +365,7 @@ fn setup(
     commands.insert_resource(NeatState { pop, agents });
 
     commands.insert_resource(render);
+    commands.init_resource::<PlotData>();
 }
 
 fn render_game(
@@ -340,7 +407,8 @@ fn tick_games(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut human_move_instr: Local<Option<MoveInstr>>,
     mut human_rotate_instr: Local<Option<RotateInstr>>,
-    neat: Res<NeatState>,
+    mut neat: ResMut<NeatState>,
+    mut write_reset: EventWriter<ResetEvent>,
 ) {
     *ticks += 1;
 
@@ -357,7 +425,10 @@ fn tick_games(
         *human_rotate_instr = Some(RotateInstr::Counterwise);
     }
 
-    for (mut game, controller) in games.iter_mut() {
+    let death_count = Mutex::new(0);
+
+    let copied_ticks = *ticks;
+    games.par_iter_mut().for_each(|(mut game, controller)| {
         let mut move_instr = None;
         let mut rotate_instr = None;
         match controller.into_inner() {
@@ -365,8 +436,8 @@ fn tick_games(
                 move_instr = *human_move_instr;
                 rotate_instr = *human_rotate_instr;
             }
-            Controller::AI(network) => {
-                let mut inputs = vec![-1.0; game.width * game.height];
+            Controller::AI((network, agent_idx)) => {
+                let mut inputs = vec![0.0; game.width * game.height];
                 for y in 0..game.height {
                     for x in 0..game.width {
                         if game.get(x as isize, y as isize) {
@@ -374,7 +445,29 @@ fn tick_games(
                         }
                     }
                 }
-                network.update(0.1, &inputs);
+
+                for dy in 0..3 {
+                    for dx in 0..3 {
+                        let x = game.current_piece.x + dx as isize;
+                        let y = game.current_piece.y + dy as isize;
+                        if x < 0 || y < 0 || x >= game.width as isize || y >= game.height as isize {
+                            continue;
+                        }
+
+                        let x = x as usize;
+                        let y = y as usize;
+                        if PIECES[game.current_piece.kind][game.current_piece.get_rot()]
+                            [dy * 3 + dx]
+                            == '#'
+                        {
+                            inputs[game.width * y + x] = -1.0;
+                        }
+                    }
+                }
+
+                for _ in 0..2 {
+                    network.update(0.1, &inputs);
+                }
 
                 let outputs = network.get_outputs();
                 if outputs[0] < -0.9 {
@@ -394,14 +487,94 @@ fn tick_games(
             }
         }
 
-        if *ticks % 7 == 0 {
-            game.tick_input(move_instr, rotate_instr);
-            *human_move_instr = None;
-            *human_rotate_instr = None;
-        }
+        if game.in_conflict() {
+            let mut death_count = death_count.lock().unwrap();
+            *death_count += 1;
+        } else {
+            if copied_ticks % 1 == 0 {
+                game.tick_input(move_instr, rotate_instr);
+            }
 
-        if *ticks % 14 == 0 {
-            game.tick_gravity();
+            if copied_ticks % 3 == 0 {
+                game.tick_gravity();
+            }
         }
+    });
+
+    let death_count = death_count.lock().unwrap();
+    if *death_count == neat.pop.members.len() {
+        write_reset.send(ResetEvent);
     }
+}
+
+fn handle_reset(
+    mut reader: EventReader<ResetEvent>,
+    mut neat: ResMut<NeatState>,
+    mut games: Query<&mut Game>,
+    mut controllers: Query<&mut Controller>,
+    mut render: ResMut<GameRender>,
+    mut plot_data: ResMut<PlotData>,
+) {
+    let Some(ResetEvent) = reader.read().next() else {
+        return;
+    };
+
+    for agent_idx in 0..neat.pop.members.len() {
+        let agent_entity = neat.agents[agent_idx];
+        let genome = &mut neat.pop.members[agent_idx];
+        let game = games.get_mut(agent_entity).unwrap();
+        genome.fitness = game.occupancy_score();
+    }
+
+    plot_data
+        .max_fitness
+        .push_back(neat.pop.get_winner().fitness);
+    plot_data.avg_fitness.push_back(
+        neat.pop.members.iter().map(|x| x.fitness).sum::<f64>() / neat.pop.members.len() as f64,
+    );
+    neat.pop.evolve();
+
+    for agent_idx in 0..neat.pop.members.len() {
+        let agent_entity = neat.agents[agent_idx];
+        let genome = &neat.pop.members[agent_idx];
+        let mut game = games.get_mut(agent_entity).unwrap();
+        let mut controller = controllers.get_mut(agent_entity).unwrap();
+        *game = Game::new(game.width, game.height);
+        *controller = Controller::AI((neat.pop.get_phenotype(genome), agent_idx));
+    }
+}
+
+fn draw_plot(mut contexts: EguiContexts, plot_data: Res<PlotData>) {
+    let ctx = contexts.ctx_mut();
+
+    // Draw plot inside a window.
+    egui::Window::new("Fitness").movable(true).show(ctx, |ui| {
+        Plot::new("max fitness")
+            .view_aspect(2.0)
+            .show(ui, |plot_ui| {
+                let max_points = plot_data
+                    .max_fitness
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| PlotPoint { x: i as f64, y: *v })
+                    .collect::<Vec<_>>();
+                plot_ui.line(
+                    Line::new(PlotPoints::Owned(max_points))
+                        .color(Color32::GREEN)
+                        .name("max"),
+                );
+
+                let avg_points = plot_data
+                    .avg_fitness
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| PlotPoint { x: i as f64, y: *v })
+                    .collect::<Vec<_>>();
+                plot_ui.line(
+                    Line::new(PlotPoints::Owned(avg_points))
+                        .color(Color32::YELLOW)
+                        .name("avg"),
+                )
+            });
+    });
 }

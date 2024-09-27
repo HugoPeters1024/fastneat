@@ -34,6 +34,7 @@ pub struct Parameters {
     pub specie_greediness_exponent: f64,
     pub enable_elitism: bool,
     pub activation_function: ActivationFunction,
+    pub allow_recurrent_inputs: bool,
 }
 
 impl Default for Parameters {
@@ -58,6 +59,7 @@ impl Default for Parameters {
             specie_greediness_exponent: 1.5,
             enable_elitism: true,
             activation_function: ActivationFunction::Sigmoid,
+            allow_recurrent_inputs: true,
         }
     }
 }
