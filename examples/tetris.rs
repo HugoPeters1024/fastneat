@@ -61,11 +61,10 @@ enum Controller {
 
 #[derive(Component)]
 struct Game {
-    board: Vec<Cell>,
+    board: Vec<bool>,
     width: usize,
     height: usize,
     current_piece: Piece,
-    highest_set_y: usize,
     age: usize,
 }
 
@@ -81,25 +80,18 @@ enum RotateInstr {
     Counterwise,
 }
 
-#[derive(Clone)]
-enum Cell {
-    Empty,
-    Filled(usize),
-}
-
 impl Game {
     pub fn new(width: usize, height: usize) -> Self {
         Game {
-            board: vec![Cell::Empty; width * height],
+            board: vec![false; width * height],
             width,
             height,
             current_piece: Piece {
                 kind: 0,
-                x: 0,
+                x: 3,
                 y: 0,
                 rot: 0,
             },
-            highest_set_y: 10,
             age: 0,
         }
     }
@@ -110,7 +102,7 @@ impl Game {
         }
         let x = x as usize;
         let y = y as usize;
-        matches!(self.board[self.width * y + x], Cell::Filled(_))
+        self.board[self.width * y + x]
     }
 
     pub fn set(&mut self, x: isize, y: isize) {
@@ -119,8 +111,7 @@ impl Game {
         }
         let x = x as usize;
         let y = y as usize;
-        self.board[self.width * y + x] = Cell::Filled(self.age);
-        self.highest_set_y = self.highest_set_y.min(y);
+        self.board[self.width * y + x] = true;
     }
 
     pub fn in_conflict(&self) -> bool {
@@ -137,23 +128,6 @@ impl Game {
         }
 
         return false;
-    }
-
-    pub fn occupancy_score(&self) -> f64 {
-        let mut ret = 0.0;
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let cell = &self.board[self.width * y + x];
-                match cell {
-                    Cell::Empty => {}
-                    Cell::Filled(_) => {
-                        ret += (y * y) as f64 / (self.height * self.height) as f64;
-                    }
-                }
-            }
-        }
-
-        ret
     }
 
     pub fn tick_input(&mut self, move_instr: Option<MoveInstr>, rotate_instr: Option<RotateInstr>) {
@@ -200,7 +174,7 @@ impl Game {
             self.current_piece.x = 3;
             self.current_piece.y = 0;
             self.current_piece.kind += 1;
-            self.current_piece.kind %= PIECES.len();
+            self.current_piece.kind %= BASE_PIECES.len();
         }
     }
 }
@@ -324,24 +298,23 @@ fn setup(
     const POP_SIZE: usize = 100;
     let pop = Population::new(&Settings {
         population_size: POP_SIZE,
-        target_species: 5,
-        num_inputs: width * height,
+        target_species: 3,
+        num_inputs: width * height + BASE_PIECES.len() + 4 + width + height,
         num_outputs: 2,
         parameters: fastneat::params::Parameters {
-            mutate_genome_add_neuron: 0.2,
             mutate_genome_add_connection: 0.9,
-            mutate_genome_add_bias_neuron: 0.3,
+            mutate_genome_add_neuron: 0.05,
+            mutate_genome_add_bias_neuron: 0.05,
             activation_function: fastneat::params::ActivationFunction::Tanh,
             allow_recurrent_inputs: true,
-            specie_threshold_nudge_factor: 3.0,
-            specie_dropoff_age: 45,
+//            specie_threshold_nudge_factor: 3.0,
+            specie_dropoff_age: 55,
+            mutate_genome_tau_change: 0.0,
             ..default()
         },
     });
 
     let mut agents = Vec::new();
-    let mut agent_most_conns = 0;
-    let mut most_cons = 0;
     for agent_idx in 0..POP_SIZE {
         let genome = &pop.members[agent_idx];
         let network = pop.get_phenotype(&genome);
@@ -353,11 +326,6 @@ fn setup(
                 ))
                 .id(),
         );
-
-        if genome.genes.len() > most_cons {
-            most_cons = genome.genes.len();
-            agent_most_conns = agent_idx;
-        }
     }
 
     render.game_to_render = Some(agents[0].clone());
@@ -437,7 +405,7 @@ fn tick_games(
                 rotate_instr = *human_rotate_instr;
             }
             Controller::AI((network, agent_idx)) => {
-                let mut inputs = vec![0.0; game.width * game.height];
+                let mut inputs = vec![-1.0; game.width * game.height];
                 for y in 0..game.height {
                     for x in 0..game.width {
                         if game.get(x as isize, y as isize) {
@@ -446,22 +414,53 @@ fn tick_games(
                     }
                 }
 
-                for dy in 0..3 {
-                    for dx in 0..3 {
-                        let x = game.current_piece.x + dx as isize;
-                        let y = game.current_piece.y + dy as isize;
-                        if x < 0 || y < 0 || x >= game.width as isize || y >= game.height as isize {
-                            continue;
-                        }
+                //for dy in 0..3 {
+                //    for dx in 0..3 {
+                //        let x = game.current_piece.x + dx as isize;
+                //        let y = game.current_piece.y + dy as isize;
+                //        if x < 0 || y < 0 || x >= game.width as isize || y >= game.height as isize {
+                //            continue;
+                //        }
 
-                        let x = x as usize;
-                        let y = y as usize;
-                        if PIECES[game.current_piece.kind][game.current_piece.get_rot()]
-                            [dy * 3 + dx]
-                            == '#'
-                        {
-                            inputs[game.width * y + x] = -1.0;
-                        }
+                //        let x = x as usize;
+                //        let y = y as usize;
+                //        if PIECES[game.current_piece.kind][game.current_piece.get_rot()]
+                //            [dy * 3 + dx]
+                //            == '#'
+                //        {
+                //            inputs[game.width * y + x] = -1.0;
+                //        }
+                //    }
+                //}
+
+                for kind in 0..BASE_PIECES.len() {
+                    if kind == game.current_piece.kind {
+                        inputs.push(1.0)
+                    } else {
+                        inputs.push(-1.0);
+                    }
+                }
+                for rotation in 0..4 {
+                    if rotation == game.current_piece.rot {
+                        inputs.push(1.0)
+                    } else {
+                        inputs.push(-1.0);
+                    }
+                }
+
+                for x in 0..game.width {
+                    if x as isize == game.current_piece.x {
+                        inputs.push(1.0);
+                    } else {
+                        inputs.push(-1.0);
+                    }
+                }
+
+                for y in 0..game.height {
+                    if y as isize == game.current_piece.y {
+                        inputs.push(1.0);
+                    } else {
+                        inputs.push(-1.0);
                     }
                 }
 
@@ -470,18 +469,18 @@ fn tick_games(
                 }
 
                 let outputs = network.get_outputs();
-                if outputs[0] < -0.9 {
+                if outputs[0] < -0.7 {
                     move_instr = Some(MoveInstr::GoLeft)
                 }
-                if outputs[0] > 0.9 {
+                if outputs[0] > 0.7 {
                     move_instr = Some(MoveInstr::GoRight)
                 }
 
-                if outputs[1] < -0.9 {
+                if outputs[1] < -0.7 {
                     rotate_instr = Some(RotateInstr::Counterwise)
                 }
 
-                if outputs[1] > 0.9 {
+                if outputs[1] > 0.7 {
                     rotate_instr = Some(RotateInstr::Clockwise)
                 }
             }
@@ -512,7 +511,6 @@ fn handle_reset(
     mut neat: ResMut<NeatState>,
     mut games: Query<&mut Game>,
     mut controllers: Query<&mut Controller>,
-    mut render: ResMut<GameRender>,
     mut plot_data: ResMut<PlotData>,
 ) {
     let Some(ResetEvent) = reader.read().next() else {
@@ -523,7 +521,7 @@ fn handle_reset(
         let agent_entity = neat.agents[agent_idx];
         let genome = &mut neat.pop.members[agent_idx];
         let game = games.get_mut(agent_entity).unwrap();
-        genome.fitness = game.occupancy_score();
+        genome.fitness = game.age.pow(4) as f64
     }
 
     plot_data

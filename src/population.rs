@@ -1,6 +1,7 @@
 use rand::Rng;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::ctrnn::Ctrnn;
 use crate::genome::*;
@@ -63,52 +64,22 @@ impl Population {
     }
 
     fn speciate(&mut self) {
-        // collect in which specie existing organisms are.
-        let mut members_by_species: HashMap<usize, Vec<usize>> = HashMap::new();
-        for (i, member) in self.members.iter().enumerate() {
-            if let Some(specie) = member.specie_idx {
-                members_by_species.entry(specie).or_default().push(i);
-            }
-        }
-
         // remove any species without members
+        // this can happen if species have gotten no offspring
+        let known_species: HashSet<usize> =
+            self.members.iter().filter_map(|x| x.specie_idx).collect();
         self.species
-            .retain(|specie_id, _| members_by_species.contains_key(specie_id));
+            .retain(|specie_idx, _| known_species.contains(specie_idx));
 
         // unassign members from their species
         for member in self.members.iter_mut() {
             member.specie_idx = None;
         }
 
-        // select a new rep for each specie
-        for (specie_id, specie) in self.species.iter_mut() {
-            let specie_members = &members_by_species[specie_id];
-            debug_assert!(!specie_members.is_empty());
-
-            let specie_winner: usize = specie_members
-                .iter()
-                .max_by(|l, r| {
-                    self.members[**l]
-                        .fitness
-                        .partial_cmp(&self.members[**r].fitness)
-                        .unwrap()
-                })
-                .unwrap()
-                .clone();
-
-            specie.rep_idx = specie_winner;
-            // also let the rep itself know it is again part of the species
-            self.members[specie_winner].specie_idx = Some(*specie_id);
-        }
-
         // for each member, compare to each specie to see if it belongs there.
         // if it doesn't belong in any, create a new specie with that individual
         // as the rep.
         'member_loop: for member_idx in 0..self.members.len() {
-            if self.members[member_idx].specie_idx.is_some() {
-                continue;
-            }
-
             for (specie_idx, specie) in self.species.iter() {
                 let rep = &self.members[specie.rep_idx];
                 if self.members[member_idx].compatibility(
@@ -127,6 +98,38 @@ impl Population {
             self.species
                 .insert(new_specie_id, Specie::from_rep(member_idx));
             self.members[member_idx].specie_idx = Some(new_specie_id);
+        }
+
+        let mut members_by_species: HashMap<usize, Vec<usize>> = HashMap::new();
+        for (i, member) in self.members.iter().enumerate() {
+            if let Some(specie) = member.specie_idx {
+                members_by_species.entry(specie).or_default().push(i);
+            }
+        }
+
+        // remove any species without members
+        // this can happen due to an increase compatibility threshold
+        // resulting in species merging.
+        self.species
+            .retain(|specie_idx, _| members_by_species.contains_key(specie_idx));
+
+        // select a new rep for each specie
+        for (specie_id, specie) in self.species.iter_mut() {
+            let specie_members = &members_by_species[specie_id];
+            debug_assert!(!specie_members.is_empty());
+
+            let specie_winner: usize = specie_members
+                .iter()
+                .max_by(|l, r| {
+                    self.members[**l]
+                        .fitness
+                        .partial_cmp(&self.members[**r].fitness)
+                        .unwrap()
+                })
+                .unwrap()
+                .clone();
+
+            specie.rep_idx = specie_winner;
         }
 
         self.assert_species_consisent();
@@ -197,7 +200,7 @@ impl Population {
                 genome.sample_neuron_id_no_input(self.settings.num_inputs)
             };
             let innovation_number = self.next_innovation_number(neuron_from, neuron_to);
-            let weight = rng.gen_range(-10.0..10.0);
+            let weight = rng.gen_range(-4.0..4.0);
 
             genome.add_gene(Gene {
                 innovation_number,
@@ -317,6 +320,10 @@ impl Population {
                 debug_assert!(self.species.contains_key(&specie_idx));
             }
         }
+
+        for (specie_idx, specie) in self.species.iter() {
+            debug_assert!(self.members[specie.rep_idx].specie_idx == Some(*specie_idx));
+        }
     }
 
     pub fn evolve(&mut self) {
@@ -430,7 +437,9 @@ impl Population {
                 let mut child = self.crossover(&self.members[parent1], &self.members[parent2]);
                 self.mutate(&mut child);
                 child.specie_idx = Some(*specie_idx);
-                new_population.push(child);
+                if new_population.len() < self.members.len() {
+                    new_population.push(child);
+                }
             }
         }
 
@@ -438,7 +447,8 @@ impl Population {
             new_population.push(self.spawn_new_genome());
         }
 
-        self.members = new_population.as_slice()[0..self.members.len()].to_vec();
+        debug_assert!(new_population.len() == self.members.len());
+        self.members = new_population;
         self.speciate();
 
         if self.species.len() < self.settings.target_species {

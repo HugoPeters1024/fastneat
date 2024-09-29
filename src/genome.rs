@@ -141,20 +141,26 @@ impl Genome {
             a.innovation_number.cmp(&b.innovation_number)
         }) {
             match (l, r) {
+                (None, None) => panic!(),
                 (None, _) => num_mismatch += 1.0,
                 (_, None) => num_mismatch += 1.0,
                 (Some(lhs), Some(rhs)) => {
-                    if !lhs.enabled || !rhs.enabled {
+                    if lhs.enabled != !rhs.enabled {
                         num_mismatch += 1.0;
-                        continue;
                     }
 
-                    weight_diff_sum += (lhs.weight - rhs.weight).abs();
+                    if lhs.enabled && rhs.enabled {
+                        weight_diff_sum += (lhs.weight - rhs.weight).abs();
+                    }
                 }
             }
         }
 
-        let n = self.genes.len().max(other.genes.len()).max(1) as f64;
+        let mut n = self.genes.len().max(other.genes.len()).max(1) as f64;
+        // prevent increased compatiblity for smaller genomes.
+        if n < 20.0 {
+            n = 1.0;
+        }
         return genes_factor * (num_mismatch / n) + weight_factor * weight_diff_sum;
     }
 
