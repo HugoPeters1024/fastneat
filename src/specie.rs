@@ -1,17 +1,17 @@
-use crate::params::Parameters;
+use crate::{genome::Genome, params::Parameters};
 
 #[derive(Debug)]
 pub struct Specie {
-    pub rep_idx: usize,
+    pub rep: Genome,
     pub max_fitness_seen: f64,
     pub age: usize,
     pub age_last_improvement: usize,
 }
 
 impl Specie {
-    pub fn from_rep(rep_id: usize) -> Self {
+    pub fn from_rep(rep: Genome) -> Self {
         Specie {
-            rep_idx: rep_id,
+            rep,
             max_fitness_seen: 0.0,
             age: 0,
             age_last_improvement: 0,

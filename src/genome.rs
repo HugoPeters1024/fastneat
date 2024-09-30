@@ -137,10 +137,12 @@ impl Genome {
     pub fn compatibility(&self, other: &Genome, genes_factor: f64, weight_factor: f64) -> f64 {
         let mut num_mismatch = 0.0;
         let mut weight_diff_sum = 0.0;
-        for (l, r) in full_sorted_outer_join(self.genes.values(), other.genes.values(), |a, b| {
-            a.innovation_number.cmp(&b.innovation_number)
-        }) {
-            match (l, r) {
+        for (l, r) in
+            full_sorted_outer_join(self.genes.iter(), other.genes.iter(), |(a, _), (b, _)| {
+                a.cmp(&b)
+            })
+        {
+            match (l.map(|x| x.1), r.map(|x| x.1)) {
                 (None, None) => panic!(),
                 (None, _) => num_mismatch += 1.0,
                 (_, None) => num_mismatch += 1.0,
@@ -161,6 +163,8 @@ impl Genome {
         if n < 20.0 {
             n = 1.0;
         }
+
+        //dbg!((num_mismatch, weight_diff_sum));
         return genes_factor * (num_mismatch / n) + weight_factor * weight_diff_sum;
     }
 
@@ -171,13 +175,18 @@ impl Genome {
                 neuron_idx, neuron_idx, neuron.tau
             )
         }
+
+        let mut total_weights: HashMap<(usize, usize), f64> = HashMap::new();
         for gene in self.genes.values() {
             if gene.enabled {
-                println!(
-                    "n{} -> n{} [label=\"{:.2}\"]",
-                    gene.neuron_from, gene.neuron_to, gene.weight
-                );
+                *total_weights
+                    .entry((gene.neuron_from, gene.neuron_to))
+                    .or_default() += gene.weight;
             }
+        }
+
+        for ((from, to), weight) in total_weights.iter() {
+            println!("n{} -> n{} [label=\"{:.2}\"]", from, to, weight);
         }
     }
 }

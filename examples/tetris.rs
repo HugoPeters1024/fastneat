@@ -302,12 +302,14 @@ fn setup(
         num_inputs: width * height + BASE_PIECES.len() + 4 + width + height,
         num_outputs: 2,
         parameters: fastneat::params::Parameters {
-            mutate_genome_add_connection: 0.9,
+            mutate_genome_add_connection: 0.5,
             mutate_genome_add_neuron: 0.05,
             mutate_genome_add_bias_neuron: 0.05,
+            mutate_gene_nudge_factor: 4.0,
             activation_function: fastneat::params::ActivationFunction::Tanh,
-            allow_recurrent_inputs: true,
-//            specie_threshold_nudge_factor: 3.0,
+            allow_recurrent_inputs: false,
+            enable_elitism: true,
+            specie_threshold_nudge_factor: 8.0,
             specie_dropoff_age: 55,
             mutate_genome_tau_change: 0.0,
             ..default()
@@ -405,7 +407,7 @@ fn tick_games(
                 rotate_instr = *human_rotate_instr;
             }
             Controller::AI((network, agent_idx)) => {
-                let mut inputs = vec![-1.0; game.width * game.height];
+                let mut inputs = vec![-1.0; game.width * game.height + BASE_PIECES.len() + 4];
                 for y in 0..game.height {
                     for x in 0..game.width {
                         if game.get(x as isize, y as isize) {
@@ -434,18 +436,19 @@ fn tick_games(
                 //}
 
                 for kind in 0..BASE_PIECES.len() {
-                    if kind == game.current_piece.kind {
-                        inputs.push(1.0)
+                    inputs[game.width * game.height + kind] = if kind == game.current_piece.kind {
+                        1.0
                     } else {
-                        inputs.push(-1.0);
+                        -1.0
                     }
                 }
                 for rotation in 0..4 {
-                    if rotation == game.current_piece.rot {
-                        inputs.push(1.0)
-                    } else {
-                        inputs.push(-1.0);
-                    }
+                    inputs[game.width * game.height + BASE_PIECES.len() + rotation] =
+                        if rotation == game.current_piece.get_rot() {
+                            1.0
+                        } else {
+                            -1.0
+                        }
                 }
 
                 for x in 0..game.width {
@@ -521,7 +524,7 @@ fn handle_reset(
         let agent_entity = neat.agents[agent_idx];
         let genome = &mut neat.pop.members[agent_idx];
         let game = games.get_mut(agent_entity).unwrap();
-        genome.fitness = game.age.pow(4) as f64
+        genome.fitness = game.age as f64
     }
 
     plot_data

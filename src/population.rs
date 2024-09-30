@@ -81,9 +81,8 @@ impl Population {
         // as the rep.
         'member_loop: for member_idx in 0..self.members.len() {
             for (specie_idx, specie) in self.species.iter() {
-                let rep = &self.members[specie.rep_idx];
                 if self.members[member_idx].compatibility(
-                    &rep,
+                    &specie.rep,
                     self.settings.parameters.compat_mismatch_genes_factor,
                     self.settings.parameters.compat_mismatch_weight_factor,
                 ) < self.compatility_threshold
@@ -95,8 +94,10 @@ impl Population {
 
             // no matching specie was found, this member is a new specie
             let new_specie_id = self.next_specie_id();
-            self.species
-                .insert(new_specie_id, Specie::from_rep(member_idx));
+            self.species.insert(
+                new_specie_id,
+                Specie::from_rep(self.members[member_idx].clone()),
+            );
             self.members[member_idx].specie_idx = Some(new_specie_id);
         }
 
@@ -112,25 +113,6 @@ impl Population {
         // resulting in species merging.
         self.species
             .retain(|specie_idx, _| members_by_species.contains_key(specie_idx));
-
-        // select a new rep for each specie
-        for (specie_id, specie) in self.species.iter_mut() {
-            let specie_members = &members_by_species[specie_id];
-            debug_assert!(!specie_members.is_empty());
-
-            let specie_winner: usize = specie_members
-                .iter()
-                .max_by(|l, r| {
-                    self.members[**l]
-                        .fitness
-                        .partial_cmp(&self.members[**r].fitness)
-                        .unwrap()
-                })
-                .unwrap()
-                .clone();
-
-            specie.rep_idx = specie_winner;
-        }
 
         self.assert_species_consisent();
     }
@@ -153,7 +135,8 @@ impl Population {
 
         for (_, gene) in genome.genes.iter() {
             if gene.enabled {
-                ctrnn.wji.mut_data()[gene.neuron_to * num_neurons + gene.neuron_from] = gene.weight;
+                ctrnn.wji.mut_data()[gene.neuron_to * num_neurons + gene.neuron_from] +=
+                    gene.weight;
             }
         }
 
@@ -170,6 +153,7 @@ impl Population {
                     gene.weight += rng.gen_range(
                         -params.mutate_gene_nudge_factor..params.mutate_gene_nudge_factor,
                     );
+                    gene.weight = gene.weight.clamp(-20.0, 20.0);
                 }
             }
         }
@@ -278,7 +262,7 @@ impl Population {
         }) {
             match (l, r) {
                 (Some(l), Some(r)) => {
-                    let mut new_gene = if rng.gen::<bool>() {
+                    let mut new_gene = if rng.gen::<f32>() < 0.5 {
                         l.clone()
                     } else {
                         r.clone()
@@ -291,12 +275,12 @@ impl Population {
                     child.add_gene(new_gene);
                 }
                 (Some(l), None) => {
-                    if lhs.fitness > rhs.fitness {
+                    if lhs.fitness >= rhs.fitness {
                         child.add_gene(l.clone());
                     }
                 }
                 (None, Some(r)) => {
-                    if rhs.fitness > lhs.fitness {
+                    if rhs.fitness >= lhs.fitness {
                         child.add_gene(r.clone());
                     }
                 }
@@ -320,21 +304,42 @@ impl Population {
                 debug_assert!(self.species.contains_key(&specie_idx));
             }
         }
+    }
 
-        for (specie_idx, specie) in self.species.iter() {
-            debug_assert!(self.members[specie.rep_idx].specie_idx == Some(*specie_idx));
+    fn elect_new_species_rep(&mut self) {
+        let mut specie_winners: HashMap<usize, Option<usize>> = HashMap::new();
+        for (i, member) in self.members.iter().enumerate() {
+            if let Some(specie) = member.specie_idx {
+                let entry = specie_winners.entry(specie).or_default();
+                match entry {
+                    Some(current) => {
+                        if member.fitness > self.members[*current].fitness {
+                            *entry = Some(i)
+                        }
+                    }
+                    None => *entry = Some(i),
+                }
+            }
+        }
+
+        // select a new rep for each specie
+        for (specie_id, specie) in self.species.iter_mut() {
+            let winner = &self.members[specie_winners[specie_id].unwrap()];
+            if winner.fitness > specie.rep.fitness {
+                specie.rep = winner.clone();
+            }
         }
     }
 
     pub fn evolve(&mut self) {
         self.assert_species_consisent();
+        self.elect_new_species_rep();
 
         // update each specie's age and stats
         for specie in self.species.values_mut() {
             specie.age += 1;
-            let rep = &self.members[specie.rep_idx];
-            if rep.fitness > specie.max_fitness_seen {
-                specie.max_fitness_seen = rep.fitness;
+            if specie.rep.fitness > specie.max_fitness_seen {
+                specie.max_fitness_seen = specie.rep.fitness;
                 specie.age_last_improvement = 0;
             } else {
                 specie.age_last_improvement += 1;
@@ -459,6 +464,7 @@ impl Population {
             self.compatility_threshold += self.settings.parameters.specie_threshold_nudge_factor;
         }
 
+        self._innovation_cache.clear();
         self.generation += 1;
 
         println!(
