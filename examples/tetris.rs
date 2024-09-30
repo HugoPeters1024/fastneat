@@ -54,10 +54,7 @@ impl Piece {
 }
 
 #[derive(Component)]
-enum Controller {
-    Human,
-    AI((Ctrnn, usize)),
-}
+struct Controller(Ctrnn);
 
 #[derive(Component)]
 struct Game {
@@ -295,22 +292,23 @@ fn setup(
 
     commands.insert_resource(all_assets);
 
-    const POP_SIZE: usize = 100;
+    const POP_SIZE: usize = 150;
     let pop = Population::new(&Settings {
         population_size: POP_SIZE,
-        target_species: 3,
+        target_species: 5,
         num_inputs: width * height + BASE_PIECES.len() + 4 + width + height,
         num_outputs: 2,
         parameters: fastneat::params::Parameters {
-            mutate_genome_add_connection: 0.5,
-            mutate_genome_add_neuron: 0.05,
+            mutate_genome_add_connection: 0.9,
+            mutate_genome_add_neuron: 0.2,
             mutate_genome_add_bias_neuron: 0.05,
             mutate_gene_nudge_factor: 4.0,
             activation_function: fastneat::params::ActivationFunction::Tanh,
+            specie_greediness: 2.0,
             allow_recurrent_inputs: false,
             enable_elitism: true,
-            specie_threshold_nudge_factor: 8.0,
-            specie_dropoff_age: 55,
+            specie_threshold_nudge_factor: 3.0,
+            specie_dropoff_age: 35,
             mutate_genome_tau_change: 0.0,
             ..default()
         },
@@ -322,10 +320,7 @@ fn setup(
         let network = pop.get_phenotype(&genome);
         agents.push(
             commands
-                .spawn((
-                    Game::new(width, height),
-                    Controller::AI((network, agent_idx)),
-                ))
+                .spawn((Game::new(width, height), Controller(network)))
                 .id(),
         );
     }
@@ -377,7 +372,7 @@ fn tick_games(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut human_move_instr: Local<Option<MoveInstr>>,
     mut human_rotate_instr: Local<Option<RotateInstr>>,
-    mut neat: ResMut<NeatState>,
+    neat: Res<NeatState>,
     mut write_reset: EventWriter<ResetEvent>,
 ) {
     *ticks += 1;
@@ -398,108 +393,84 @@ fn tick_games(
     let death_count = Mutex::new(0);
 
     let copied_ticks = *ticks;
-    games.par_iter_mut().for_each(|(mut game, controller)| {
+    games.par_iter_mut().for_each(|(mut game, mut controller)| {
         let mut move_instr = None;
         let mut rotate_instr = None;
-        match controller.into_inner() {
-            Controller::Human => {
-                move_instr = *human_move_instr;
-                rotate_instr = *human_rotate_instr;
-            }
-            Controller::AI((network, agent_idx)) => {
-                let mut inputs = vec![-1.0; game.width * game.height + BASE_PIECES.len() + 4];
-                for y in 0..game.height {
-                    for x in 0..game.width {
-                        if game.get(x as isize, y as isize) {
-                            inputs[y * game.width + x] = 1.0;
-                        }
-                    }
-                }
-
-                //for dy in 0..3 {
-                //    for dx in 0..3 {
-                //        let x = game.current_piece.x + dx as isize;
-                //        let y = game.current_piece.y + dy as isize;
-                //        if x < 0 || y < 0 || x >= game.width as isize || y >= game.height as isize {
-                //            continue;
-                //        }
-
-                //        let x = x as usize;
-                //        let y = y as usize;
-                //        if PIECES[game.current_piece.kind][game.current_piece.get_rot()]
-                //            [dy * 3 + dx]
-                //            == '#'
-                //        {
-                //            inputs[game.width * y + x] = -1.0;
-                //        }
-                //    }
-                //}
-
-                for kind in 0..BASE_PIECES.len() {
-                    inputs[game.width * game.height + kind] = if kind == game.current_piece.kind {
-                        1.0
-                    } else {
-                        -1.0
-                    }
-                }
-                for rotation in 0..4 {
-                    inputs[game.width * game.height + BASE_PIECES.len() + rotation] =
-                        if rotation == game.current_piece.get_rot() {
-                            1.0
-                        } else {
-                            -1.0
-                        }
-                }
-
-                for x in 0..game.width {
-                    if x as isize == game.current_piece.x {
-                        inputs.push(1.0);
-                    } else {
-                        inputs.push(-1.0);
-                    }
-                }
-
-                for y in 0..game.height {
-                    if y as isize == game.current_piece.y {
-                        inputs.push(1.0);
-                    } else {
-                        inputs.push(-1.0);
-                    }
-                }
-
-                for _ in 0..2 {
-                    network.update(0.1, &inputs);
-                }
-
-                let outputs = network.get_outputs();
-                if outputs[0] < -0.7 {
-                    move_instr = Some(MoveInstr::GoLeft)
-                }
-                if outputs[0] > 0.7 {
-                    move_instr = Some(MoveInstr::GoRight)
-                }
-
-                if outputs[1] < -0.7 {
-                    rotate_instr = Some(RotateInstr::Counterwise)
-                }
-
-                if outputs[1] > 0.7 {
-                    rotate_instr = Some(RotateInstr::Clockwise)
-                }
-            }
-        }
 
         if game.in_conflict() {
             let mut death_count = death_count.lock().unwrap();
             *death_count += 1;
-        } else {
-            if copied_ticks % 1 == 0 {
-                game.tick_input(move_instr, rotate_instr);
-            }
+            return;
+        }
 
-            if copied_ticks % 3 == 0 {
-                game.tick_gravity();
+        let network = &mut controller.0;
+        let mut inputs = vec![-1.0; game.width * game.height + BASE_PIECES.len() + 4];
+        for y in 0..game.height {
+            for x in 0..game.width {
+                if game.get(x as isize, y as isize) {
+                    inputs[y * game.width + x] = 1.0;
+                }
             }
+        }
+
+        for kind in 0..BASE_PIECES.len() {
+            inputs[game.width * game.height + kind] = if kind == game.current_piece.kind {
+                1.0
+            } else {
+                -1.0
+            }
+        }
+        for rotation in 0..4 {
+            inputs[game.width * game.height + BASE_PIECES.len() + rotation] =
+                if rotation == game.current_piece.get_rot() {
+                    1.0
+                } else {
+                    -1.0
+                }
+        }
+
+        for x in 0..game.width {
+            if x as isize == game.current_piece.x {
+                inputs.push(1.0);
+            } else {
+                inputs.push(-1.0);
+            }
+        }
+
+        for y in 0..game.height {
+            if y as isize == game.current_piece.y {
+                inputs.push(1.0);
+            } else {
+                inputs.push(-1.0);
+            }
+        }
+
+        for _ in 0..2 {
+            network.update(0.1, &inputs);
+        }
+
+        let outputs = network.get_outputs();
+        if outputs[0] < -0.7 {
+            move_instr = Some(MoveInstr::GoLeft)
+        }
+        if outputs[0] > 0.7 {
+            move_instr = Some(MoveInstr::GoRight)
+        }
+
+        if outputs[1] < -0.7 {
+            rotate_instr = Some(RotateInstr::Counterwise)
+        }
+
+        if outputs[1] > 0.7 {
+            rotate_instr = Some(RotateInstr::Clockwise)
+        }
+
+        if copied_ticks % 1 == 0 {
+            game.tick_input(move_instr, rotate_instr);
+        }
+
+        if copied_ticks % 3 == 0 {
+            game.tick_gravity();
         }
     });
 
@@ -541,7 +512,7 @@ fn handle_reset(
         let mut game = games.get_mut(agent_entity).unwrap();
         let mut controller = controllers.get_mut(agent_entity).unwrap();
         *game = Game::new(game.width, game.height);
-        *controller = Controller::AI((neat.pop.get_phenotype(genome), agent_idx));
+        *controller = Controller(neat.pop.get_phenotype(genome));
     }
 }
 

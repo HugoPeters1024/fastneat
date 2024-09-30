@@ -2,6 +2,7 @@ use rand::Rng;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::iter::Peekable;
 
 use crate::ctrnn::Ctrnn;
 use crate::genome::*;
@@ -101,10 +102,10 @@ impl Population {
             self.members[member_idx].specie_idx = Some(new_specie_id);
         }
 
-        let mut members_by_species: HashMap<usize, Vec<usize>> = HashMap::new();
-        for (i, member) in self.members.iter().enumerate() {
+        let mut referenced_species: HashSet<usize> = HashSet::new();
+        for member in self.members.iter() {
             if let Some(specie) = member.specie_idx {
-                members_by_species.entry(specie).or_default().push(i);
+                referenced_species.insert(specie);
             }
         }
 
@@ -112,7 +113,7 @@ impl Population {
         // this can happen due to an increase compatibility threshold
         // resulting in species merging.
         self.species
-            .retain(|specie_idx, _| members_by_species.contains_key(specie_idx));
+            .retain(|specie_idx, _| referenced_species.contains(specie_idx));
 
         self.assert_species_consisent();
     }
@@ -257,18 +258,18 @@ impl Population {
         let mut rng = rand::thread_rng();
         let mut child = Genome::empty(&self.settings);
 
-        for (l, r) in full_sorted_outer_join(lhs.genes.values(), rhs.genes.values(), |a, b| {
+        for (l, r) in FullSortedOuterJoin::new(lhs.genes.values(), rhs.genes.values(), |a, b| {
             a.innovation_number.cmp(&b.innovation_number)
         }) {
             match (l, r) {
                 (Some(l), Some(r)) => {
-                    let mut new_gene = if rng.gen::<f32>() < 0.5 {
+                    let mut new_gene = if rng.gen::<bool>() {
                         l.clone()
                     } else {
                         r.clone()
                     };
 
-                    if (!l.enabled || !r.enabled) && rng.gen::<f32>() < 0.5 {
+                    if (!l.enabled || !r.enabled) && rng.gen::<bool>() {
                         new_gene.enabled = false
                     }
 
@@ -284,7 +285,7 @@ impl Population {
                         child.add_gene(r.clone());
                     }
                 }
-                (None, None) => unreachable!(),
+                (None, None) => {}
             }
         }
 
@@ -309,24 +310,27 @@ impl Population {
     fn elect_new_species_rep(&mut self) {
         let mut specie_winners: HashMap<usize, Option<usize>> = HashMap::new();
         for (i, member) in self.members.iter().enumerate() {
-            if let Some(specie) = member.specie_idx {
-                let entry = specie_winners.entry(specie).or_default();
+            if let Some(specie_idx) = member.specie_idx {
+                let entry = specie_winners.entry(specie_idx).or_default();
                 match entry {
                     Some(current) => {
                         if member.fitness > self.members[*current].fitness {
                             *entry = Some(i)
                         }
                     }
-                    None => *entry = Some(i),
+                    None => {
+                        if member.fitness > self.species[&specie_idx].rep.fitness {
+                            *entry = Some(i)
+                        }
+                    }
                 }
             }
         }
 
         // select a new rep for each specie
         for (specie_id, specie) in self.species.iter_mut() {
-            let winner = &self.members[specie_winners[specie_id].unwrap()];
-            if winner.fitness > specie.rep.fitness {
-                specie.rep = winner.clone();
+            if let Some(winner_idx) = specie_winners[specie_id] {
+                specie.rep = self.members[winner_idx].clone();
             }
         }
     }
@@ -377,49 +381,28 @@ impl Population {
                 .push(i);
         }
 
-        let adjusted_fitness: Vec<f64> = self
-            .members
-            .iter()
-            .map(|m| {
-                m.fitness
-                    / members_by_species[&m.specie_idx.expect("speciation should be done")].len()
-                        as f64
-            })
-            .collect();
-
         let adjusted_avg_fitness_by_species: HashMap<usize, f64> = members_by_species
             .iter()
             .map(|(specie_idx, specie_members)| {
-                (
-                    *specie_idx,
-                    specie_members
-                        .iter()
-                        .map(|m| adjusted_fitness[*m])
-                        .sum::<f64>()
-                        / specie_members.len() as f64,
-                )
+                let total_raw: f64 = specie_members
+                    .iter()
+                    .map(|member_idx| self.members[*member_idx].fitness)
+                    .sum();
+                let avg_adjusted = total_raw / (specie_members.len() * specie_members.len()) as f64;
+                (*specie_idx, avg_adjusted)
             })
             .collect();
 
-        let global_avg: f64 = adjusted_fitness.iter().sum::<f64>() / adjusted_fitness.len() as f64;
-
-        let offspring_by_species: HashMap<usize, usize> = adjusted_avg_fitness_by_species
-            .iter()
-            .map(|(specie_idx, adjusted_fitness)| {
-                (
-                    *specie_idx,
-                    if self.species[specie_idx].should_die(&self.settings.parameters) {
-                        0
-                    } else {
-                        ((adjusted_fitness / global_avg)
-                            * members_by_species[specie_idx].len() as f64)
-                            .floor() as usize
-                    },
-                )
-            })
-            .collect();
+        let total_avg_fitness: f64 = adjusted_avg_fitness_by_species.values().sum();
 
         for (specie_idx, specie_members) in members_by_species.iter() {
+            let mut offspring = if self.species[specie_idx].should_die(&self.settings.parameters) {
+                0
+            } else {
+                ((adjusted_avg_fitness_by_species[specie_idx] / total_avg_fitness)
+                    * self.members.len() as f64)
+                    .round() as usize
+            };
             let mut all_fitnesses: Vec<(usize, f64)> = specie_members
                 .iter()
                 .map(|member_idx| (*member_idx, self.members[*member_idx].fitness))
@@ -427,16 +410,23 @@ impl Population {
             all_fitnesses.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
             let total_fitness: f64 = all_fitnesses.iter().map(|x| x.1).sum();
 
-            for _ in 0..offspring_by_species[specie_idx] {
+            if offspring > 0 && self.settings.parameters.enable_elitism {
+                if new_population.len() < self.members.len() {
+                    new_population.push(self.species[specie_idx].rep.clone());
+                }
+                offspring -= 1;
+            }
+
+            for _ in 0..offspring {
                 let parent1 = sample_parent(
                     &all_fitnesses,
                     total_fitness,
-                    self.settings.parameters.specie_greediness_exponent,
+                    self.settings.parameters.specie_greediness,
                 );
                 let parent2 = sample_parent(
                     &all_fitnesses,
                     total_fitness,
-                    self.settings.parameters.specie_greediness_exponent,
+                    self.settings.parameters.specie_greediness,
                 );
 
                 let mut child = self.crossover(&self.members[parent1], &self.members[parent2]);
@@ -486,13 +476,9 @@ impl Population {
     }
 }
 
-fn sample_parent(
-    sorted_fitness: &Vec<(usize, f64)>,
-    total_fitness: f64,
-    greedy_exponent: f64,
-) -> usize {
+fn sample_parent(sorted_fitness: &Vec<(usize, f64)>, total_fitness: f64, greediness: f64) -> usize {
     let mut rng = rand::thread_rng();
-    let sample = (rng.gen_range(0.0..1.0) as f64).powf(greedy_exponent) * total_fitness;
+    let sample = (rng.gen_range(0.0..1.0f64).powf(greediness)) * total_fitness;
     let mut acc = 0.0;
     for (i, fitness) in sorted_fitness {
         acc += fitness;
@@ -507,43 +493,48 @@ fn sample_parent(
     )
 }
 
-pub fn full_sorted_outer_join<I, J, F>(
-    iter1: I,
-    iter2: J,
-    mut cmp: F,
-) -> Vec<(Option<I::Item>, Option<J::Item>)>
+pub struct FullSortedOuterJoin<I: Iterator, J: Iterator, F> {
+    iter1: Peekable<I>,
+    iter2: Peekable<J>,
+    cmp: F,
+}
+
+impl<I, J, F> FullSortedOuterJoin<I, J, F>
 where
     I: Iterator,
     J: Iterator,
-    F: FnMut(&I::Item, &J::Item) -> Ordering,
+    F: Fn(&I::Item, &J::Item) -> Ordering,
 {
-    let mut result = Vec::new();
-
-    let mut iter1 = iter1.peekable();
-    let mut iter2 = iter2.peekable();
-
-    while iter1.peek().is_some() || iter2.peek().is_some() {
-        match (iter1.peek(), iter2.peek()) {
-            (Some(a), Some(b)) => match cmp(a, b) {
-                Ordering::Less => {
-                    result.push((Some(iter1.next().unwrap()), None));
-                }
-                Ordering::Greater => {
-                    result.push((None, Some(iter2.next().unwrap())));
-                }
-                Ordering::Equal => {
-                    result.push((Some(iter1.next().unwrap()), Some(iter2.next().unwrap())));
-                }
-            },
-            (Some(_), None) => {
-                result.push((Some(iter1.next().unwrap()), None));
-            }
-            (None, Some(_)) => {
-                result.push((None, Some(iter2.next().unwrap())));
-            }
-            (None, None) => unreachable!(),
+    pub fn new(iter1: I, iter2: J, cmp: F) -> Self {
+        Self {
+            iter1: iter1.peekable(),
+            iter2: iter2.peekable(),
+            cmp,
         }
     }
+}
 
-    result
+impl<I, J, F> Iterator for FullSortedOuterJoin<I, J, F>
+where
+    I: Iterator,
+    J: Iterator,
+    F: Fn(&I::Item, &J::Item) -> Ordering,
+{
+    type Item = (Option<I::Item>, Option<J::Item>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.iter1.peek(), self.iter2.peek()) {
+            (Some(a), Some(b)) => match (self.cmp)(a, b) {
+                Ordering::Less => Some((Some(self.iter1.next().unwrap()), None)),
+                Ordering::Greater => Some((None, Some(self.iter2.next().unwrap()))),
+                Ordering::Equal => Some((
+                    Some(self.iter1.next().unwrap()),
+                    Some(self.iter2.next().unwrap()),
+                )),
+            },
+            (Some(_), None) => Some((Some(self.iter1.next().unwrap()), None)),
+            (None, Some(_)) => Some((None, Some(self.iter2.next().unwrap()))),
+            (None, None) => None,
+        }
+    }
 }

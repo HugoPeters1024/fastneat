@@ -1,8 +1,7 @@
 use rand::Rng;
 use std::collections::{BTreeMap, HashMap};
 
-use crate::params::*;
-use crate::population::full_sorted_outer_join;
+use crate::{params::*, population::FullSortedOuterJoin};
 
 #[derive(Clone, Debug)]
 pub struct Gene {
@@ -137,13 +136,11 @@ impl Genome {
     pub fn compatibility(&self, other: &Genome, genes_factor: f64, weight_factor: f64) -> f64 {
         let mut num_mismatch = 0.0;
         let mut weight_diff_sum = 0.0;
-        for (l, r) in
-            full_sorted_outer_join(self.genes.iter(), other.genes.iter(), |(a, _), (b, _)| {
-                a.cmp(&b)
-            })
-        {
-            match (l.map(|x| x.1), r.map(|x| x.1)) {
-                (None, None) => panic!(),
+        for (l, r) in FullSortedOuterJoin::new(self.genes.values(), other.genes.values(), |a, b| {
+            a.innovation_number.cmp(&b.innovation_number)
+        }) {
+            match (l, r) {
+                (None, None) => {}
                 (None, _) => num_mismatch += 1.0,
                 (_, None) => num_mismatch += 1.0,
                 (Some(lhs), Some(rhs)) => {

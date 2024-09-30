@@ -12,14 +12,14 @@ fn main() {
     let settings = Settings {
         num_inputs: 2,
         num_outputs: 1,
-        population_size: 80,
+        population_size: 150,
         target_species: 3,
         parameters: Parameters {
-            mutate_genome_add_connection: 0.5,
+            mutate_genome_add_connection: 0.9,
             mutate_genome_add_neuron: 0.05,
             mutate_genome_add_bias_neuron: 0.02,
-            specie_greediness_exponent: 1.0,
-            specie_dropoff_age: 15,
+            specie_greediness: 2.5,
+            specie_dropoff_age: 5,
             enable_elitism: true,
             mutate_genome_tau_change: 0.0,
             ..Default::default()

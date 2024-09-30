@@ -110,8 +110,7 @@ fn setup(
             population_size: 300,
             target_species: 7,
             parameters: Parameters {
-                specie_greediness_exponent: 4.5,
-                specie_threshold_nudge_factor: 0.5,
+                specie_threshold_nudge_factor: 3.5,
                 activation_function: ActivationFunction::Tanh,
                 ..default()
             },
