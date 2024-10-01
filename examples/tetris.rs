@@ -1,4 +1,7 @@
-use std::{collections::VecDeque, sync::Mutex};
+use std::{
+    collections::VecDeque,
+    sync::{atomic::AtomicUsize, Mutex},
+};
 
 use bevy::{
     prelude::*,
@@ -292,7 +295,7 @@ fn setup(
 
     commands.insert_resource(all_assets);
 
-    const POP_SIZE: usize = 150;
+    const POP_SIZE: usize = 128;
     let pop = Population::new(&Settings {
         population_size: POP_SIZE,
         target_species: 5,
@@ -375,8 +378,7 @@ fn tick_games(
     neat: Res<NeatState>,
     mut write_reset: EventWriter<ResetEvent>,
 ) {
-    *ticks += 1;
-
+    const TICKS_PER_TICK: usize = 5;
     if keyboard.just_pressed(KeyCode::ArrowRight) {
         *human_move_instr = Some(MoveInstr::GoRight);
     }
@@ -390,94 +392,97 @@ fn tick_games(
         *human_rotate_instr = Some(RotateInstr::Counterwise);
     }
 
-    let death_count = Mutex::new(0);
+    let death_count = AtomicUsize::new(0);
 
     let copied_ticks = *ticks;
     games.par_iter_mut().for_each(|(mut game, mut controller)| {
-        let mut move_instr = None;
-        let mut rotate_instr = None;
+        for copied_ticks in copied_ticks..copied_ticks + TICKS_PER_TICK
+        {
+            let mut move_instr = None;
+            let mut rotate_instr = None;
 
-        if game.in_conflict() {
-            let mut death_count = death_count.lock().unwrap();
-            *death_count += 1;
-            return;
-        }
+            if game.in_conflict() {
+                death_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return;
+            }
 
-        let network = &mut controller.0;
-        let mut inputs = vec![-1.0; game.width * game.height + BASE_PIECES.len() + 4];
-        for y in 0..game.height {
-            for x in 0..game.width {
-                if game.get(x as isize, y as isize) {
-                    inputs[y * game.width + x] = 1.0;
+            let network = &mut controller.0;
+            let mut inputs = vec![-1.0; game.width * game.height + BASE_PIECES.len() + 4];
+            for y in 0..game.height {
+                for x in 0..game.width {
+                    if game.get(x as isize, y as isize) {
+                        inputs[y * game.width + x] = 1.0;
+                    }
                 }
             }
-        }
 
-        for kind in 0..BASE_PIECES.len() {
-            inputs[game.width * game.height + kind] = if kind == game.current_piece.kind {
-                1.0
-            } else {
-                -1.0
-            }
-        }
-        for rotation in 0..4 {
-            inputs[game.width * game.height + BASE_PIECES.len() + rotation] =
-                if rotation == game.current_piece.get_rot() {
+            for kind in 0..BASE_PIECES.len() {
+                inputs[game.width * game.height + kind] = if kind == game.current_piece.kind {
                     1.0
                 } else {
                     -1.0
                 }
-        }
-
-        for x in 0..game.width {
-            if x as isize == game.current_piece.x {
-                inputs.push(1.0);
-            } else {
-                inputs.push(-1.0);
             }
-        }
-
-        for y in 0..game.height {
-            if y as isize == game.current_piece.y {
-                inputs.push(1.0);
-            } else {
-                inputs.push(-1.0);
+            for rotation in 0..4 {
+                inputs[game.width * game.height + BASE_PIECES.len() + rotation] =
+                    if rotation == game.current_piece.get_rot() {
+                        1.0
+                    } else {
+                        -1.0
+                    }
             }
-        }
 
-        for _ in 0..2 {
-            network.update(0.1, &inputs);
-        }
+            for x in 0..game.width {
+                if x as isize == game.current_piece.x {
+                    inputs.push(1.0);
+                } else {
+                    inputs.push(-1.0);
+                }
+            }
 
-        let outputs = network.get_outputs();
-        if outputs[0] < -0.7 {
-            move_instr = Some(MoveInstr::GoLeft)
-        }
-        if outputs[0] > 0.7 {
-            move_instr = Some(MoveInstr::GoRight)
-        }
+            for y in 0..game.height {
+                if y as isize == game.current_piece.y {
+                    inputs.push(1.0);
+                } else {
+                    inputs.push(-1.0);
+                }
+            }
 
-        if outputs[1] < -0.7 {
-            rotate_instr = Some(RotateInstr::Counterwise)
-        }
+            for _ in 0..1 {
+                network.update(0.1, &inputs);
+            }
 
-        if outputs[1] > 0.7 {
-            rotate_instr = Some(RotateInstr::Clockwise)
-        }
+            let outputs = network.get_outputs();
+            if outputs[0] < -0.9 {
+                move_instr = Some(MoveInstr::GoLeft)
+            }
+            if outputs[0] > 0.9 {
+                move_instr = Some(MoveInstr::GoRight)
+            }
 
-        if copied_ticks % 1 == 0 {
-            game.tick_input(move_instr, rotate_instr);
-        }
+            if outputs[1] < -0.9 {
+                rotate_instr = Some(RotateInstr::Counterwise)
+            }
 
-        if copied_ticks % 3 == 0 {
-            game.tick_gravity();
+            if outputs[1] > 0.9 {
+                rotate_instr = Some(RotateInstr::Clockwise)
+            }
+
+            if copied_ticks % 1 == 0 {
+                game.tick_input(move_instr, rotate_instr);
+            }
+
+            if copied_ticks % 3 == 0 {
+                game.tick_gravity();
+            }
         }
     });
 
-    let death_count = death_count.lock().unwrap();
-    if *death_count == neat.pop.members.len() {
+    if death_count.load(std::sync::atomic::Ordering::Acquire) == neat.pop.members.len()
+    {
         write_reset.send(ResetEvent);
     }
+    *ticks += TICKS_PER_TICK;
 }
 
 fn handle_reset(
