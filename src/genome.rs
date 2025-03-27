@@ -161,7 +161,6 @@ impl Genome {
             n = 1.0;
         }
 
-        //dbg!((num_mismatch, weight_diff_sum));
         return genes_factor * (num_mismatch / n) + weight_factor * weight_diff_sum;
     }
 

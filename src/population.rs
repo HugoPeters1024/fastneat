@@ -353,7 +353,7 @@ impl Population {
         let mut new_population = Vec::new();
 
         let mut elite_idx = 0;
-        let mut elite_fitness = f64::NEG_INFINITY;
+        let mut elite_fitness = 0.0;
         for (member_idx, member) in self.members.iter().enumerate() {
             if member.fitness > elite_fitness {
                 elite_fitness = member.fitness;
@@ -361,12 +361,15 @@ impl Population {
             }
         }
 
+        // the overall elite should be preserved, the specie with this elite
+        // individual may be killed and its offspring set to 0.
         if self.settings.parameters.enable_elitism {
             let mut elite = self.members[elite_idx].clone();
             elite.specie_idx = None;
             elite.fitness = 0.0;
             new_population.push(elite);
         }
+
 
         // collect in which specie existing organisms are.
         let mut members_by_species: HashMap<usize, Vec<usize>> = HashMap::new();
@@ -401,7 +404,7 @@ impl Population {
             } else {
                 ((adjusted_avg_fitness_by_species[specie_idx] / total_avg_fitness)
                     * self.members.len() as f64)
-                    .round() as usize
+                    .floor() as usize
             };
             let mut all_fitnesses: Vec<(usize, f64)> = specie_members
                 .iter()
@@ -410,10 +413,12 @@ impl Population {
             all_fitnesses.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
             let total_fitness: f64 = all_fitnesses.iter().map(|x| x.1).sum();
 
+            // if configured, prevent regressions in species.
             if offspring > 0 && self.settings.parameters.enable_elitism {
-                if new_population.len() < self.members.len() {
-                    new_population.push(self.species[specie_idx].rep.clone());
-                }
+                let specie_elite = all_fitnesses[0].0;
+                let mut specie_winner = self.members[specie_elite].clone();
+                specie_winner.fitness = 0.0;
+                new_population.push(specie_winner);
                 offspring -= 1;
             }
 
@@ -442,7 +447,12 @@ impl Population {
             new_population.push(self.spawn_new_genome());
         }
 
-        debug_assert!(new_population.len() == self.members.len());
+        // make sure fitness is reset.
+        for m in new_population.iter_mut() {
+            m.fitness = 0.0;
+        }
+
+        assert!(new_population.len() == self.members.len());
         self.members = new_population;
         self.speciate();
 

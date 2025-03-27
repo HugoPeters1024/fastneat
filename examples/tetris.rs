@@ -1,7 +1,4 @@
-use std::{
-    collections::VecDeque,
-    sync::{atomic::AtomicUsize, Mutex},
-};
+use std::{collections::VecDeque, sync::atomic::AtomicUsize};
 
 use bevy::{
     prelude::*,
@@ -25,7 +22,7 @@ fn main() {
         .add_systems(FixedUpdate, tick_games)
         .add_systems(FixedUpdate, handle_reset)
         .add_event::<ResetEvent>()
-        .insert_resource(Time::<Fixed>::from_hz(196.0))
+        .insert_resource(Time::<Fixed>::from_hz(96.0))
         .run();
 }
 
@@ -61,11 +58,12 @@ struct Controller(Ctrnn);
 
 #[derive(Component)]
 struct Game {
-    board: Vec<bool>,
+    _board: VecDeque<usize>,
     width: usize,
     height: usize,
     current_piece: Piece,
     age: usize,
+    lines_cleared: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -82,8 +80,9 @@ enum RotateInstr {
 
 impl Game {
     pub fn new(width: usize, height: usize) -> Self {
+        assert!(width <= 64);
         Game {
-            board: vec![false; width * height],
+            _board: vec![0; height].into(),
             width,
             height,
             current_piece: Piece {
@@ -93,6 +92,7 @@ impl Game {
                 rot: 0,
             },
             age: 0,
+            lines_cleared: 0,
         }
     }
 
@@ -102,7 +102,7 @@ impl Game {
         }
         let x = x as usize;
         let y = y as usize;
-        self.board[self.width * y + x]
+        (self._board[y] & (1 << x)) != 0
     }
 
     pub fn set(&mut self, x: isize, y: isize) {
@@ -111,7 +111,7 @@ impl Game {
         }
         let x = x as usize;
         let y = y as usize;
-        self.board[self.width * y + x] = true;
+        self._board[y] |= 1 << x;
     }
 
     pub fn in_conflict(&self) -> bool {
@@ -175,6 +175,16 @@ impl Game {
             self.current_piece.y = 0;
             self.current_piece.kind += 1;
             self.current_piece.kind %= BASE_PIECES.len();
+            self.handle_lines_clear();
+        }
+    }
+
+    pub fn handle_lines_clear(&mut self) {
+        self._board
+            .retain(|x| x.count_ones() < (self.width - 4) as u32);
+        self.lines_cleared += self.height - self._board.len();
+        while self._board.len() < self.height {
+            self._board.push_front(0);
         }
     }
 }
@@ -295,7 +305,7 @@ fn setup(
 
     commands.insert_resource(all_assets);
 
-    const POP_SIZE: usize = 128;
+    const POP_SIZE: usize = 512;
     let pop = Population::new(&Settings {
         population_size: POP_SIZE,
         target_species: 5,
@@ -303,16 +313,16 @@ fn setup(
         num_outputs: 2,
         parameters: fastneat::params::Parameters {
             mutate_genome_add_connection: 0.9,
-            mutate_genome_add_neuron: 0.2,
-            mutate_genome_add_bias_neuron: 0.05,
-            mutate_gene_nudge_factor: 4.0,
+            mutate_genome_add_neuron: 0.1,
+            mutate_genome_add_bias_neuron: 0.03,
+            mutate_genome_tau_change: 0.2,
             activation_function: fastneat::params::ActivationFunction::Tanh,
-            specie_greediness: 2.0,
-            allow_recurrent_inputs: false,
+            specie_greediness: 3.0,
+            allow_recurrent_inputs: true,
             enable_elitism: true,
-            specie_threshold_nudge_factor: 3.0,
-            specie_dropoff_age: 35,
-            mutate_genome_tau_change: 0.0,
+            specie_threshold_nudge_factor: 1.5,
+            specie_threshold_initial: 50.0,
+            specie_dropoff_age: 30,
             ..default()
         },
     });
@@ -372,32 +382,18 @@ fn render_game(
 fn tick_games(
     mut games: Query<(&mut Game, &mut Controller)>,
     mut ticks: Local<usize>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut human_move_instr: Local<Option<MoveInstr>>,
-    mut human_rotate_instr: Local<Option<RotateInstr>>,
     neat: Res<NeatState>,
     mut write_reset: EventWriter<ResetEvent>,
 ) {
-    const TICKS_PER_TICK: usize = 5;
-    if keyboard.just_pressed(KeyCode::ArrowRight) {
-        *human_move_instr = Some(MoveInstr::GoRight);
-    }
-    if keyboard.just_pressed(KeyCode::ArrowLeft) {
-        *human_move_instr = Some(MoveInstr::GoLeft);
-    }
-    if keyboard.just_pressed(KeyCode::KeyW) || keyboard.just_pressed(KeyCode::ArrowUp) {
-        *human_rotate_instr = Some(RotateInstr::Clockwise);
-    }
-    if keyboard.just_pressed(KeyCode::KeyQ) {
-        *human_rotate_instr = Some(RotateInstr::Counterwise);
-    }
+    const TICKS_PER_TICK: usize = 1;
 
     let death_count = AtomicUsize::new(0);
 
     let copied_ticks = *ticks;
     games.par_iter_mut().for_each(|(mut game, mut controller)| {
-        for copied_ticks in copied_ticks..copied_ticks + TICKS_PER_TICK
-        {
+        let mut inputs =
+            vec![-1.0; game.width * game.height + BASE_PIECES.len() + 4 + game.width + game.height];
+        for copied_ticks in copied_ticks..copied_ticks + TICKS_PER_TICK {
             let mut move_instr = None;
             let mut rotate_instr = None;
 
@@ -407,11 +403,12 @@ fn tick_games(
             }
 
             let network = &mut controller.0;
-            let mut inputs = vec![-1.0; game.width * game.height + BASE_PIECES.len() + 4];
             for y in 0..game.height {
                 for x in 0..game.width {
                     if game.get(x as isize, y as isize) {
                         inputs[y * game.width + x] = 1.0;
+                    } else {
+                        inputs[y * game.width + x] = -1.0;
                     }
                 }
             }
@@ -434,37 +431,38 @@ fn tick_games(
 
             for x in 0..game.width {
                 if x as isize == game.current_piece.x {
-                    inputs.push(1.0);
+                    inputs[game.width * game.height + BASE_PIECES.len() + 4 + x] = 1.0;
                 } else {
-                    inputs.push(-1.0);
+                    inputs[game.width * game.height + BASE_PIECES.len() + 4 + x] = -1.0;
                 }
             }
 
             for y in 0..game.height {
                 if y as isize == game.current_piece.y {
-                    inputs.push(1.0);
+                    inputs[game.width * game.height + BASE_PIECES.len() + 4 + game.width + y] = 1.0;
                 } else {
-                    inputs.push(-1.0);
+                    inputs[game.width * game.height + BASE_PIECES.len() + 4 + game.width + y] =
+                        -1.0;
                 }
             }
 
-            for _ in 0..1 {
+            for _ in 0..2 {
                 network.update(0.1, &inputs);
             }
 
             let outputs = network.get_outputs();
-            if outputs[0] < -0.9 {
+            if outputs[0] < -0.8 {
                 move_instr = Some(MoveInstr::GoLeft)
             }
-            if outputs[0] > 0.9 {
+            if outputs[0] > 0.8 {
                 move_instr = Some(MoveInstr::GoRight)
             }
 
-            if outputs[1] < -0.9 {
+            if outputs[1] < -0.8 {
                 rotate_instr = Some(RotateInstr::Counterwise)
             }
 
-            if outputs[1] > 0.9 {
+            if outputs[1] > 0.8 {
                 rotate_instr = Some(RotateInstr::Clockwise)
             }
 
@@ -478,8 +476,7 @@ fn tick_games(
         }
     });
 
-    if death_count.load(std::sync::atomic::Ordering::Acquire) == neat.pop.members.len()
-    {
+    if death_count.load(std::sync::atomic::Ordering::Acquire) == neat.pop.members.len() {
         write_reset.send(ResetEvent);
     }
     *ticks += TICKS_PER_TICK;
@@ -500,7 +497,12 @@ fn handle_reset(
         let agent_entity = neat.agents[agent_idx];
         let genome = &mut neat.pop.members[agent_idx];
         let game = games.get_mut(agent_entity).unwrap();
-        genome.fitness = game.age as f64
+        genome.fitness = game.age as f64;
+        for y in 0..game.height {
+            genome.fitness += y as f64 * game._board[y].count_ones().pow(2) as f64;
+        }
+
+        genome.fitness += game.lines_cleared as f64 * 1000.0;
     }
 
     plot_data

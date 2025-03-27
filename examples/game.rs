@@ -12,7 +12,7 @@ use fastneat::{
     params::{ActivationFunction, Parameters, Settings},
     population::Population,
 };
-use rand::Rng;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 
 fn main() {
     App::new()
@@ -107,10 +107,11 @@ fn setup(
         pop: Population::new(&Settings {
             num_inputs: 2,
             num_outputs: 2,
-            population_size: 300,
-            target_species: 7,
+            population_size: 200,
+            target_species: 3,
             parameters: Parameters {
                 specie_threshold_nudge_factor: 3.5,
+                specie_greediness: 8.0,
                 activation_function: ActivationFunction::Tanh,
                 ..default()
             },
@@ -130,6 +131,18 @@ fn random_target() -> Vec3 {
     let y = 0.5;
     let z = t.sin() * 8.0;
     Vec3::new(x, y, z)
+}
+
+pub fn generate_random_color(seed: u64) -> Color {
+    // Create a seeded random number generator
+    let mut rng = StdRng::seed_from_u64(seed);
+
+    // Generate three random floats between 0 and 1
+    let x: f32 = rng.gen(); // Generates a float in [0, 1)
+    let y: f32 = rng.gen(); // Generates a float in [0, 1)
+    let z: f32 = rng.gen(); // Generates a float in [0, 1)
+
+    Color::linear_rgb(x, y, z)
 }
 
 fn handle_reset(
@@ -154,7 +167,8 @@ fn handle_reset(
                         Brain(neat.pop.get_phenotype(member)),
                         PbrBundle {
                             mesh: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-                            material: materials.add(Color::srgb_u8(124, 144, 255)),
+                            material: materials
+                                .add(generate_random_color(member.specie_idx.unwrap() as u64)),
                             transform: Transform::from_xyz(0.0, 0.5, 0.0),
                             ..default()
                         },

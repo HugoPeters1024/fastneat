@@ -12,13 +12,13 @@ fn main() {
     let settings = Settings {
         num_inputs: 2,
         num_outputs: 1,
-        population_size: 200,
+        population_size: 1000,
         target_species: 5,
         parameters: Parameters {
             mutate_genome_add_connection: 0.9,
-            mutate_genome_add_neuron: 0.05,
-            mutate_genome_add_bias_neuron: 0.02,
-            specie_greediness: 2.5,
+            mutate_genome_add_neuron: 0.001,
+            mutate_genome_add_bias_neuron: 0.002,
+            specie_greediness: 4.5,
             specie_dropoff_age: 5,
             enable_elitism: true,
             mutate_genome_tau_change: 0.3,
@@ -42,7 +42,7 @@ fn main() {
     for ((inputs, outputs), _) in XOR_RESULTS {
         let mut i = population.get_phenotype(&genome);
         for _ in 0..10 {
-            i.update(0.2, &vec![inputs, outputs]);
+            i.update(0.1, &vec![inputs, outputs]);
         }
         println!("{} XOR {} = {}", inputs, outputs, i.get_outputs()[0]);
     }
@@ -56,7 +56,7 @@ fn eval_population(population: &mut Population) {
         for ((lhs, rhs), expected) in XOR_RESULTS.iter() {
             let mut network = population.get_phenotype(&population.members[genome_idx]);
             for _ in 0..10 {
-                network.update(0.2, &vec![*lhs, *rhs]);
+                network.update(0.1, &vec![*lhs, *rhs]);
             }
             let output = network.get_outputs()[0];
             (&mut population.members[genome_idx]).fitness += 1.0 - (output - expected).abs();
